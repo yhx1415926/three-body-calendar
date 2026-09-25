@@ -1,0 +1,4 @@
+module CRebound {
+    umbrella header "CRebound.h"
+    export *
+}

@@ -1,0 +1,15 @@
+# macOS metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift Package Manager and Xcode local state
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.dSYM/
+
+# Locally packaged release artifacts
+dist/
