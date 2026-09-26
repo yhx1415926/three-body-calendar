@@ -21,11 +21,30 @@ actor SimulationWorker {
     }
 
     func advanceLive(years: Double) throws -> SimulationSnapshot? {
-        guard let live, let liveScenario else { return nil }
+        try advanceLiveSampled(years: years).last
+    }
+
+    /// Sample the actual integrated orbit at fixed physical resolution, independently
+    /// of playback speed. This actor keeps the extra integration work off the UI thread.
+    func advanceLiveSampled(years: Double) throws -> [SimulationSnapshot] {
+        guard let live, let liveScenario else { return [] }
         guard live.status != .collision else { throw SimulationError.engine("天体发生碰撞，观测已停止。请修改初始条件或重置模拟。") }
-        var snapshot = try live.integrate(toDays: live.snapshot.timeDays + years * liveScenario.standardYearDays)
-        snapshot.timeDays += liveTimeOffset
-        return snapshot
+        guard live.status != .escaped else { throw SimulationError.engine(live.escapeEvent?.message ?? "天体已逃逸，观测已停止。请修改初始条件或重置模拟。") }
+        guard years.isFinite, years > 0 else { return [] }
+        let boundedYears = min(years, Double(PlaybackSampling.maximumSamplesPerBatch) / PlaybackSampling.samplesPerYear)
+        let count = max(1, Int(ceil(boundedYears * PlaybackSampling.samplesPerYear)))
+        let start = live.snapshot.timeDays
+        let duration = boundedYears * liveScenario.standardYearDays
+        var frames: [SimulationSnapshot] = []
+        frames.reserveCapacity(count)
+        for index in 1...count {
+            try Task.checkCancellation()
+            var snapshot = try live.integrate(toDays: start + duration * Double(index) / Double(count))
+            snapshot.timeDays += liveTimeOffset
+            frames.append(snapshot)
+            if live.status == .collision || live.status == .escaped { break }
+        }
+        return frames
     }
 
     /// Reintegrate the physical state from the closest earlier full-precision display snapshot.
@@ -57,7 +76,11 @@ actor SimulationWorker {
 
     func advanceCalendar(includeResult: Bool) throws -> WorkUpdate? {
         guard let calendar else { return nil }
-        _ = try calendar.advance(maxSamples: 256)
+        let started = ContinuousClock.now
+        repeat {
+            try Task.checkCancellation()
+            _ = try calendar.advance(maxSamples: 256)
+        } while calendar.progress.status == .running && started.duration(to: .now) < .milliseconds(40)
         return calendarUpdate(includeResult: includeResult || calendar.progress.status != .running)
     }
 
@@ -75,6 +98,8 @@ actor SimulationWorker {
         calendar = try CalendarSimulation(checkpointData: checkpoint)
         return calendarUpdate(includeResult: true)!
     }
+
+    func discardCalendar() { calendar = nil }
 
     func extend(to years: Int, expectedScenario: Scenario) throws -> WorkUpdate? {
         guard let calendar else { return nil }

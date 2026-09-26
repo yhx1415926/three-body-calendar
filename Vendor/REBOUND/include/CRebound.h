@@ -6,5 +6,6 @@
 /// Enable continuous (line-path) collision detection and stop without merging.
 /// Restore this callback after loading a simulation archive.
 void trisolaris_rebound_set_collision_halt(struct reb_simulation *simulation);
+struct reb_simulation *trisolaris_rebound_copy(struct reb_simulation *simulation);
 
 #endif

@@ -9,7 +9,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_BUNDLE="$ROOT_DIR/dist/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_BINARY="$APP_CONTENTS/MacOS/$PROCESS_NAME"
-BUILD_CONFIGURATION="${TRISOLARIS_BUILD_CONFIGURATION:-debug}"
+BUILD_CONFIGURATION="${TRISOLARIS_BUILD_CONFIGURATION:-release}"
+if [[ "$MODE" == "--debug" || "$MODE" == "debug" ]]; then
+  BUILD_CONFIGURATION="${TRISOLARIS_BUILD_CONFIGURATION:-debug}"
+fi
 
 case "$MODE" in
   run|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify|--build-only) ;;
@@ -55,8 +58,8 @@ cat > "$APP_CONTENTS/Info.plist" <<PLIST
   <key>CFBundleName</key><string>$APP_NAME</string>
   <key>CFBundleDisplayName</key><string>$APP_NAME</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>1.1.0</string>
+  <key>CFBundleVersion</key><string>2</string>
   <key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>

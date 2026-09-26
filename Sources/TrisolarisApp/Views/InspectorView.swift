@@ -65,7 +65,7 @@ struct InspectorView: View {
                             Text("每年环境采样").font(.system(size: 11)).foregroundStyle(.secondary)
                             Spacer()
                             Picker("每年采样", selection: $store.draft.numerics.samplesPerYear) {
-                                Text("512").tag(512); Text("1024").tag(1024); Text("2048").tag(2048); Text("4096").tag(4096)
+                                Text("256 · 自动加密").tag(256); Text("512").tag(512); Text("1024").tag(1024); Text("2048").tag(2048); Text("4096").tag(4096)
                             }.labelsHidden().frame(width: 90)
                         }
                         Text("IAS15 · 双精度 · 自适应步长\n近距离相遇自动加密。更小的容差不代表混沌系统拥有更长的物理预测期限。")

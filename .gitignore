@@ -13,3 +13,11 @@ xcuserdata/
 
 # Locally packaged release artifacts
 dist/
+
+# Local project and simulation checkpoints; keep the documented example.
+*.trisolaris
+!Examples/*.trisolaris
+*.reb
+*.bin
+*.tmp
+.cache/

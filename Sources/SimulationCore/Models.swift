@@ -67,8 +67,8 @@ public struct ClimateRules: Codable, Sendable, Hashable {
 
 public struct NumericalSettings: Codable, Sendable, Hashable {
     public var tolerance: Double = 1e-9
-    public var samplesPerYear: Int = 512
-    public init(tolerance: Double = 1e-9, samplesPerYear: Int = 512) {
+    public var samplesPerYear: Int = 256
+    public init(tolerance: Double = 1e-9, samplesPerYear: Int = 256) {
         self.tolerance = tolerance; self.samplesPerYear = samplesPerYear
     }
     public static let strict = NumericalSettings(tolerance: 1e-11, samplesPerYear: 1024)
@@ -191,7 +191,7 @@ public struct CalendarYear: Codable, Sendable, Hashable, Identifiable {
     public var isComplete: Bool
     public var id: Int { year }
 }
-public enum RunStatus: String, Codable, Sendable { case ready, running, completed, collision, failed }
+public enum RunStatus: String, Codable, Sendable { case ready, running, completed, collision, escaped, failed }
 public struct SimulationEvent: Codable, Sendable, Hashable, Identifiable {
     public var id: UUID = UUID()
     public var timeDays: Double

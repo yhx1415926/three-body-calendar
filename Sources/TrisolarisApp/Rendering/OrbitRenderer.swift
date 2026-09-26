@@ -21,11 +21,6 @@ private struct OrbitBodyInstance {
     var lightSelected: SIMD4<Float>
 }
 
-// The GPU finishes writing before the completion handler reads this buffer.
-private struct CompletedCaptureBuffer: @unchecked Sendable {
-    let value: any MTLBuffer
-}
-
 private enum OrbitRenderingError: LocalizedError {
     case unavailable
     case initialization(String)
@@ -146,7 +141,12 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
         self.resetToken = resetToken
         if followSelected, let body = self.frame.bodies.first(where: { $0.id == selectedID }) {
             camera.target = body.position
-            if changedFollow { camera.panOffset = .zero }
+            if changedFollow {
+                camera.panOffset = .zero
+                let nearest = self.frame.bodies.filter { $0.id != body.id }.map { simd_length($0.position-body.position) }.min() ?? 1
+                camera.scale = max(nearest*1.5,body.radius*20,0.001)
+                camera.distance = camera.scale*3.5
+            }
         }
     }
 
@@ -185,7 +185,8 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
 
     private func displayRadius(_ body: RenderBody) -> Double {
         guard exaggeratedSizes else { return body.radius }
-        return max(body.radius, camera.scale * (body.isStar ? 0.018 : 0.007))
+        let nearest = frame.bodies.filter { $0.id != body.id }.map { simd_length($0.position-body.position) }.min() ?? camera.scale
+        return max(body.radius, min(nearest*0.20, camera.scale * (body.isStar ? 0.025 : 0.011)))
     }
 
     private func projectedBodies(size: CGSize) -> [OrbitProjectedBody] {
@@ -327,7 +328,7 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
         }
         for body in frame.bodies {
             guard let trail = trails[body.id], trail.count > 1 else { continue }
-            let strideSize = max(1, Int(ceil(Double(trail.count) / 2_400)))
+            let strideSize = max(1, Int(ceil(Double(trail.count) / 4_096)))
             var indices = Array(stride(from: 0, to: trail.count, by: strideSize))
             if indices.last != trail.count - 1 { indices.append(trail.count - 1) }
             for index in 1..<indices.count {
@@ -355,10 +356,10 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
                   destinationBytesPerImage: bytesPerRow * height)
         blit.endEncoding()
         capturePending = false
-        let readbackBuffer = CompletedCaptureBuffer(value: buffer)
+        let capturedBuffer = SendableMetalBuffer(buffer)
         command.addCompletedHandler { [weak self] completed in
             guard completed.status == .completed else { return }
-            let pixels = Data(bytes: readbackBuffer.value.contents(), count: bytesPerRow * height)
+            let pixels = Data(bytes: capturedBuffer.value.contents(), count: bytesPerRow * height)
             Task { @MainActor [weak self] in
                 guard let provider = CGDataProvider(data: pixels as CFData),
                       let cgImage = CGImage(width: width, height: height, bitsPerComponent: 8,
@@ -373,3 +374,6 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
         }
     }
 }
+
+/// The buffer is only read after its command buffer completes; ownership is retained for that callback.
+private struct SendableMetalBuffer: @unchecked Sendable { let value: MTLBuffer; init(_ value: MTLBuffer) { self.value = value } }

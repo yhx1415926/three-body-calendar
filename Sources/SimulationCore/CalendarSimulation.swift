@@ -4,7 +4,7 @@ import Foundation
 public final class CalendarSimulation {
     public private(set) var scenario: Scenario
     public let standardYearDays: Double
-    private let engine: NBodySimulation
+    private var engine: NBodySimulation
     private var climate: ClimateHistory?
     private var lastSnapshot: SimulationSnapshot
     private var status: RunStatus = .ready
@@ -52,7 +52,7 @@ public final class CalendarSimulation {
     private var confirmationDays: Double { climate == nil ? 0 : scenario.climateRules.minimumStableYears*standardYearDays }
     private var horizonDays: Double { targetDays+confirmationDays }
     private var confirmedThroughDays: Double {
-        if status == .collision || status == .failed || status == .completed { return min(targetDays,lastSnapshot.timeDays) }
+        if status == .collision || status == .escaped || status == .failed || status == .completed { return min(targetDays,lastSnapshot.timeDays) }
         return min(targetDays,max(0,lastSnapshot.timeDays-confirmationDays))
     }
     public var progress: SimulationProgress {
@@ -70,15 +70,17 @@ public final class CalendarSimulation {
             guard end > start else { continue }
             while intervalIndex < intervals.count && intervals[intervalIndex].endDays <= start { intervalIndex += 1 }
             var stableDuration = 0.0
+            var hasChaoticDuration = false
             var i = intervalIndex
             while i < intervals.count && intervals[i].startDays < end {
                 if intervals[i].kind == .stable { stableDuration += max(0,min(end,intervals[i].endDays)-max(start,intervals[i].startDays)) }
+                else if min(end,intervals[i].endDays) > max(start,intervals[i].startDays) { hasChaoticDuration = true }
                 i += 1
             }
             let complete = end >= Double(stat.year)*standardYearDays-standardYearDays*1e-10 && confirmedThroughDays >= end-standardYearDays*1e-10
             let fraction = min(1,max(0,stableDuration/(end-start)))
             years.append(CalendarYear(year: stat.year, startDays: start, endDays: end,
-                kind: complete && fraction >= 1-1e-10 ? .stable : .chaotic, stableFraction: fraction,
+                kind: complete && !hasChaoticDuration && stableDuration > 0 ? .stable : .chaotic, stableFraction: fraction,
                 minimumTemperatureC: stat.minimumTemperatureC, maximumTemperatureC: stat.maximumTemperatureC,
                 minimumFluxEarth: stat.minimumFluxEarth, maximumFluxEarth: stat.maximumFluxEarth, isComplete: complete))
         }
@@ -90,7 +92,16 @@ public final class CalendarSimulation {
     @discardableResult public func advance(maxSamples: Int = 512) throws -> SimulationProgress {
         guard maxSamples > 0, status == .ready || status == .running else { return progress }
         status = .running
+        // Keep rollback work bounded even when a chaotic interval needs many refinements.
+        // Refreshing this exact state copy does not change any integration target or climate sample.
+        var anchor = try engine.fork()
+        var acceptedTargets: [Double] = []
+        acceptedTargets.reserveCapacity(maxSamples*2)
         for _ in 0..<maxSamples {
+            if acceptedTargets.count >= 128 {
+                anchor = try engine.fork()
+                acceptedTargets.removeAll(keepingCapacity: true)
+            }
             let remaining = horizonDays-engine.timeDays
             if remaining <= max(1e-9,horizonDays*1e-14) { status = .completed; break }
             let maximum = standardYearDays/Double(scenario.numerics.samplesPerYear)
@@ -98,19 +109,15 @@ public final class CalendarSimulation {
             // Landing exactly on boundaries keeps the year aggregation independent of adaptive cadence.
             let nextYear = (floor(engine.timeDays/standardYearDays+1e-11)+1)*standardYearDays
             let end = min(horizonDays,min(engine.timeDays+step,nextYear))
-            let previous = lastSnapshot
             do {
-                var current = try engine.integrate(toDays: end)
-                if var history = climate, let flux = current.fluxEarth, current.timeDays > previous.timeDays {
-                    history.append(timeDays: current.timeDays, flux: flux)
-                    current.temperatureC = history.temperatureC
-                    current.fluxCoefficientOfVariation = history.coefficientOfVariation
-                    climate = history
-                    appendClimateSegment(from: previous,to: current)
-                    appendStatistics(from: previous,to: current)
-                }
-                lastSnapshot = current
-                if current.timeDays >= nextReplayDays || engine.status == .collision || current.timeDays >= horizonDays-1e-8 {
+                let accepted = try advanceSegment(to: end, depth: 0, recover: {
+                    let recovered = try anchor.fork()
+                    for time in acceptedTargets { try recovered.integrate(toDays: time) }
+                    return recovered
+                })
+                acceptedTargets.append(contentsOf: accepted)
+                let current = lastSnapshot
+                if current.timeDays >= nextReplayDays || engine.status == .collision || engine.status == .escaped || current.timeDays >= horizonDays-1e-8 {
                     replay.append(current)
                     nextReplayDays = current.timeDays+replayStrideDays
                     if replay.count > 8192 {
@@ -124,6 +131,11 @@ public final class CalendarSimulation {
                     events.append(SimulationEvent(timeDays: current.timeDays, message: "\(names)发生碰撞，模拟终止。后续年份未计算。", bodyIDs: engine.collisionBodyIDs))
                     break
                 }
+                if engine.status == .escaped {
+                    status = .escaped
+                    if let event = engine.escapeEvent { events.append(event) }
+                    break
+                }
             } catch {
                 status = .failed
                 events.append(SimulationEvent(timeDays: engine.timeDays, message: error.localizedDescription))
@@ -134,10 +146,69 @@ public final class CalendarSimulation {
         return progress
     }
 
+    /// Midpoint checks resolve narrow threshold crossings; rejected intervals restore the full IAS15 state.
+    /// Screen cadence and exported trajectory density are not involved in this decision.
+    private func advanceSegment(to end: Double, depth: Int, recover: (() throws -> NBodySimulation)? = nil) throws -> [Double] {
+        let first = lastSnapshot, duration = end-first.timeDays
+        guard duration > 0 else { return [] }
+        let savedEngine = depth > 0 ? try engine.fork() : nil
+        let midpointTime = first.timeDays+duration/2
+        var midpoint = try engine.integrate(toDays: midpointTime)
+        var final = engine.status == .collision || engine.status == .escaped ? midpoint : try engine.integrate(toDays: end)
+        var midpointHistory = climate
+        if let flux = midpoint.fluxEarth {
+            midpointHistory?.append(timeDays: midpoint.timeDays, flux: flux)
+            midpoint.temperatureC = midpointHistory?.temperatureC
+            midpoint.fluxCoefficientOfVariation = midpointHistory?.coefficientOfVariation
+        }
+        var finalHistory = midpointHistory
+        if let flux = final.fluxEarth {
+            finalHistory?.append(timeDays: final.timeDays, flux: flux)
+            final.temperatureC = finalHistory?.temperatureC
+            final.fluxCoefficientOfVariation = finalHistory?.coefficientOfVariation
+        }
+        let eventTolerance = standardYearDays*1e-6
+        var needsRefinement = engine.status == .collision
+        if let history = climate, let f0 = first.fluxEarth, let fm = midpoint.fluxEarth, let f1 = final.fluxEarth,
+           let t0 = first.temperatureC, let tm = midpoint.temperatureC, let t1 = final.temperatureC {
+            let rules = scenario.climateRules
+            func near(_ a: Double, _ m: Double, _ b: Double, _ limit: Double) -> Bool {
+                let low = min(a,m,b), high = max(a,m,b)
+                let variation = high-low
+                guard variation > max(abs(limit),1)*1e-13 else { return false }
+                let curvature = abs(m-(a+b)/2)*4
+                return limit > low-curvature && limit < high+curvature
+            }
+            needsRefinement = needsRefinement ||
+                near(f0,fm,f1,rules.minimumFluxEarth) || near(f0,fm,f1,rules.maximumFluxEarth) ||
+                near(t0,tm,t1,rules.minimumTemperatureC) || near(t0,tm,t1,rules.maximumTemperatureC) ||
+                near(first.fluxCoefficientOfVariation ?? 0,midpoint.fluxCoefficientOfVariation ?? 0,final.fluxCoefficientOfVariation ?? 0,rules.maximumFluxCoefficientOfVariation)
+            var singleStep = history
+            singleStep.append(timeDays: final.timeDays, flux: f1)
+            needsRefinement = needsRefinement || abs(singleStep.temperatureC-t1) > 5e-5
+        }
+        if needsRefinement && engine.status != .escaped && duration > eventTolerance && depth < 24 {
+            if let savedEngine { engine = savedEngine }
+            else if let recover { engine = try recover() }
+            else { throw SimulationError.engine("无法恢复事件细化的积分状态") }
+            var accepted = try advanceSegment(to: midpointTime, depth: depth+1)
+            if engine.status != .collision && engine.status != .escaped { accepted.append(contentsOf: try advanceSegment(to: end, depth: depth+1)) }
+            return accepted
+        }
+        if midpoint.timeDays > first.timeDays {
+            appendClimateSegment(from: first,to: midpoint); appendStatistics(from: first,to: midpoint)
+        }
+        if final.timeDays > midpoint.timeDays {
+            appendClimateSegment(from: midpoint,to: final); appendStatistics(from: midpoint,to: final)
+        }
+        climate = finalHistory; lastSnapshot = final
+        return final.timeDays > midpoint.timeDays ? [midpoint.timeDays,final.timeDays] : [midpoint.timeDays]
+    }
+
     /// Extends the same realization, retaining the original year unit and already integrated confirmation tail.
     public func extend(toYears years: Int) throws {
-        guard years > scenario.durationYears, years <= 100_000, status != .collision, status != .failed else {
-            throw SimulationError.engine("只能延长未碰撞、未失败的模拟，最长为 100000 标准年。")
+        guard years > scenario.durationYears, years <= 100_000, status != .collision, status != .escaped, status != .failed else {
+            throw SimulationError.engine("只能延长未碰撞、未逃逸、未失败的模拟，最长为 100000 标准年。")
         }
         scenario.durationYears = years
         if status == .completed { status = .running }
@@ -233,9 +304,13 @@ struct ClimateHistory: Codable {
     mutating func append(timeDays end: Double, flux: Double) {
         let dt = end-timeDays
         guard dt > 0 else { return }
-        // Exact relaxation for a constant target, with a midpoint target for the sampled varying irradiation.
-        let target = (rules.equilibriumTemperatureC(fluxEarth: lastFlux)+rules.equilibriumTemperatureC(fluxEarth: flux))/2
-        temperatureC = target+(temperatureC-target)*exp(-dt/rules.thermalResponseDays)
+        // Exact relaxation for a linearly varying equilibrium target, evaluated stably for small dt/tau.
+        let initialTarget = rules.equilibriumTemperatureC(fluxEarth: lastFlux)
+        let finalTarget = rules.equilibriumTemperatureC(fluxEarth: flux)
+        let x = dt/rules.thermalResponseDays
+        let oneMinusExponential = -expm1(-x)
+        let rampWeight = x < 1e-4 ? x/2-x*x/6+x*x*x/24 : 1-oneMinusExponential/x
+        temperatureC += (initialTarget-temperatureC)*oneMinusExponential+(finalTarget-initialTarget)*rampWeight
         let new = FluxSegment(start: timeDays,end: end,first: lastFlux,last: flux)
         segments.append(new); area += new.area; squareArea += new.squareArea
         let windowStart = max(0,end-rules.rollingWindowYears*standardYearDays)
@@ -249,7 +324,12 @@ struct ClimateHistory: Codable {
             area += replacement.area-old.area; squareArea += replacement.squareArea-old.squareArea
             segments[segmentHead] = replacement
         }
-        if segmentHead > 512 { segments.removeFirst(segmentHead); segmentHead = 0 }
+        if segmentHead > 512 {
+            segments.removeFirst(segmentHead); segmentHead = 0
+            // Periodic rebasing bounds cancellation error across millions of sliding-window updates.
+            area = segments.reduce(0) { $0+$1.area }
+            squareArea = segments.reduce(0) { $0+$1.squareArea }
+        }
         let duration = end-windowStart, mean = area/duration
         coefficientOfVariation = mean > 0 ? sqrt(max(0,squareArea/duration-mean*mean))/mean : 0
         timeDays = end; lastFlux = flux

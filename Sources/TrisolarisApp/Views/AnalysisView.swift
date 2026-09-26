@@ -12,11 +12,7 @@ struct AnalysisView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                HStack(spacing: 22) {
-                    MetricTile(title: "能量相对特征尺度漂移", value: store.snapshot?.diagnostics.normalizedEnergyError.scientific ?? "—", tint: ObservatoryPalette.mint)
-                    MetricTile(title: "角动量归一化漂移", value: store.snapshot?.diagnostics.normalizedAngularMomentumError.scientific ?? "—")
-                    MetricTile(title: "最近天体间距", value: store.snapshot?.diagnostics.minimumSeparationAU.display(4) ?? "—", unit: "AU")
-                }.padding(.vertical, 3)
+                ConservationMetrics(store: store)
                 if !chartYears.isEmpty {
                     Panel(title: "模型温度的长期变化", subtitle: "YEAR / °C") {
                         temperatureChart
@@ -88,5 +84,16 @@ struct AnalysisView: View {
             Text(title).font(.system(size: 11, weight: .medium)).frame(width: 42, alignment: .leading)
             Text(content).font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(3)
         }
+    }
+}
+
+private struct ConservationMetrics: View {
+    let store: WorkspaceStore
+    var body: some View {
+        HStack(spacing: 22) {
+            MetricTile(title: "能量相对特征尺度漂移", value: store.snapshot?.diagnostics.normalizedEnergyError.scientific ?? "—", tint: ObservatoryPalette.mint)
+            MetricTile(title: "角动量归一化漂移", value: store.snapshot?.diagnostics.normalizedAngularMomentumError.scientific ?? "—")
+            MetricTile(title: "最近天体间距", value: store.snapshot?.diagnostics.minimumSeparationAU.display(4) ?? "—", unit: "AU")
+        }.padding(.vertical, 3)
     }
 }

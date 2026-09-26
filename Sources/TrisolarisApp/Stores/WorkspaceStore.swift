@@ -21,6 +21,8 @@ final class WorkspaceStore {
     var isSaving = false
     var hasUnsavedChanges = false
     var playbackRate = 0.12
+    var usesManualPlaybackRate = false
+    var manualPlaybackPosition = PlaybackSampling.sliderPosition(for: 0.12)
     var randomSpatialScaleAU = 8.0
     var randomVirialRatio = 0.4
     var followSelected = false
@@ -39,6 +41,8 @@ final class WorkspaceStore {
 
     @ObservationIgnored private let worker = SimulationWorker()
     @ObservationIgnored private var playbackTask: Task<Void, Never>?
+    @ObservationIgnored private var trailHistory = OrbitTrailHistory()
+    @ObservationIgnored private var playbackToken = UUID()
     @ObservationIgnored private var calculationTask: Task<Void, Never>?
     @ObservationIgnored private var autosaveTask: Task<Void, Never>?
     @ObservationIgnored private var sessionToken = UUID()
@@ -81,7 +85,7 @@ final class WorkspaceStore {
             if let path = UserDefaults.standard.string(forKey: "lastRecoveryPath"), FileManager.default.fileExists(atPath: path) {
                 do {
                     try await load(URL(fileURLWithPath: path), recovery: true)
-                    notice = "已恢复上次工作，计算保持暂停"
+                    notice = "已恢复上次工作 · " + notice
                     return
                 } catch { notice = "恢复文件无法读取，已打开新项目" }
             }
@@ -92,10 +96,13 @@ final class WorkspaceStore {
     func edited() { hasUnsavedChanges = true; changeRevision &+= 1 }
 
     func choosePreset(_ index: Int, seed: UInt64 = UInt64.random(in: 1...UInt64.max)) {
+        guard let preset = OrbitPreset(rawValue: index) else { return }
         stopAll()
         if let result { previousResult = result }
         result = nil; progress = nil; canResume = false; verificationSummary = nil
-        draft = index == 0 ? Presets.stableHierarchy() : index == 1 ? Presets.figureEight(includePlanet: false) : Presets.random(seed: seed, template: draft, spatialScaleAU: randomSpatialScaleAU, virialRatio: randomVirialRatio)
+        draft = preset == .random
+            ? Presets.random(seed: seed, template: draft, spatialScaleAU: randomSpatialScaleAU, virialRatio: randomVirialRatio)
+            : Presets.scenario(for: preset)
         selectedBodyID = draft.bodies.first?.id.uuidString
         Task { await resetSimulation() }
     }
@@ -131,17 +138,33 @@ final class WorkspaceStore {
     }
 
     private func beginPlayback() {
+        playbackTask?.cancel()
+        let token = UUID()
+        playbackToken = token
         isPlaying = true
         playbackTask = Task {
-            while !Task.isCancelled && isPlaying {
+            let clock = ContinuousClock()
+            var lastFrame = clock.now
+            var firstFrame = true
+            while !Task.isCancelled && isPlaying && playbackToken == token {
                 do {
-                    if let frame = try await worker.advanceLive(years: playbackRate / 30) {
-                        guard !Task.isCancelled else { break }
-                        snapshot = frame; appendTrail(frame)
+                    let now = clock.now
+                    let elapsed = lastFrame.duration(to: now).components
+                    let seconds = firstFrame ? 1.0 / 30 : min(1.0 / 15, max(1.0 / 120, Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18))
+                    firstFrame = false
+                    lastFrame = now
+                    let frames = try await worker.advanceLiveSampled(years: playbackRate * seconds)
+                    guard !Task.isCancelled, playbackToken == token else { break }
+                    if let frame = frames.last {
+                        snapshot = frame
+                        appendTrails(frames)
                     }
-                    try await Task.sleep(for: .milliseconds(33))
+                    try await clock.sleep(until: now.advanced(by: .milliseconds(33)))
                 } catch is CancellationError { break }
-                catch { errorMessage = error.localizedDescription; isPlaying = false; break }
+                catch {
+                    if playbackToken == token { errorMessage = error.localizedDescription; isPlaying = false }
+                    break
+                }
             }
         }
     }
@@ -157,7 +180,17 @@ final class WorkspaceStore {
         }
     }
 
-    func stopPlayback() { isPlaying = false; playbackTask?.cancel(); playbackTask = nil }
+    func stopPlayback() { playbackToken = UUID(); isPlaying = false; playbackTask?.cancel(); playbackTask = nil }
+
+    func setManualPlaybackPosition(_ position: Double) {
+        manualPlaybackPosition = min(1, max(0, position))
+        usesManualPlaybackRate = true
+        playbackRate = PlaybackSampling.rate(at: manualPlaybackPosition)
+    }
+
+    var trailRetentionYears: Double {
+        Double(PlaybackSampling.pointLimit(preference: UserDefaults.standard.integer(forKey: "trailPoints"))) / PlaybackSampling.samplesPerYear
+    }
 
     func startCalendar(strict: Bool = false) {
         guard !isComputing else { return }
@@ -232,16 +265,19 @@ final class WorkspaceStore {
 
     private func calculationLoop(token: UUID) async {
         var lastResult = Date.distantPast
+        var lastPublished = Date.distantPast
         var lastRecovery = Date.now
         do {
             while !Task.isCancelled && isComputing && sessionToken == token {
-                let includeResult = Date().timeIntervalSince(lastResult) > 0.4
+                let includeResult = Date().timeIntervalSince(lastResult) > 0.8
                 guard let update = try await worker.advanceCalendar(includeResult: includeResult) else { break }
                 guard !Task.isCancelled, sessionToken == token else { return }
-                accept(update)
+                if includeResult || Date().timeIntervalSince(lastPublished) >= 0.15 || update.progress.status != .running {
+                    accept(update); lastPublished = .now
+                }
                 if includeResult { lastResult = .now }
                 if let started = calculationStartedAt { elapsedCalculationSeconds = Date().timeIntervalSince(started) }
-                if update.progress.status == .completed || update.progress.status == .collision || update.progress.status == .failed {
+                if update.progress.status != .running && update.progress.status != .ready {
                     isComputing = false; canResume = false
                     notice = update.progress.status == .completed ? "万年历计算完成" : "计算已停止，请查看事件记录"
                     if isVerification { compareVerification() }
@@ -250,6 +286,8 @@ final class WorkspaceStore {
                 if Date().timeIntervalSince(lastRecovery) > 20 { await autosave(); lastRecovery = .now }
                 await Task.yield()
             }
+        } catch is CancellationError {
+            return
         } catch { calculationFailed(error, token: token) }
     }
 
@@ -269,28 +307,39 @@ final class WorkspaceStore {
         appendTrail(update.snapshot); edited()
     }
 
-    private func appendTrail(_ frame: SimulationSnapshot) {
-        let limit = max(100, UserDefaults.standard.integer(forKey: "trailPoints") == 0 ? 900 : UserDefaults.standard.integer(forKey: "trailPoints"))
-        for body in frame.bodies {
-            let key = body.id.uuidString
-            trails[key, default: []].append(SIMD3(body.positionAU.x, body.positionAU.y, body.positionAU.z))
-            if trails[key, default: []].count > limit { trails[key]?.removeFirst(trails[key]!.count - limit) }
+    func appendTrail(_ frame: SimulationSnapshot) {
+        appendTrails([frame])
+    }
+
+    private func appendTrails(_ frames: [SimulationSnapshot]) {
+        if trails.isEmpty { trailHistory = OrbitTrailHistory() }
+        let limit = PlaybackSampling.pointLimit(preference: UserDefaults.standard.integer(forKey: "trailPoints"))
+        for frame in frames {
+            let positions = Dictionary(uniqueKeysWithValues: frame.bodies.map {
+                ($0.id.uuidString, SIMD3($0.positionAU.x, $0.positionAU.y, $0.positionAU.z))
+            })
+            trailHistory.append(time: frame.timeDays, positions: positions, yearDays: standardYearDays, pointLimit: limit)
         }
+        trails = trailHistory.points
     }
 
     func showYear(_ year: CalendarYear) {
         selectedYear = year.year
-        guard let result, !result.snapshots.isEmpty else { return }
-        stopPlayback(); page = .observatory; notice = "正在恢复第 \(year.year) 年的轨道"
+        showOrbit(at: year.startDays, label: "第 \(year.year) 年年初")
+    }
+
+    func showOrbit(at timeDays: Double, label: String) {
+        guard !isComputing, let result, !result.snapshots.isEmpty else { return }
+        stopPlayback(); page = .observatory; notice = "正在恢复\(label)的轨道"
         let token = sessionToken
         Task {
             do {
-                let frames = try await worker.seekLive(scenario: result.scenario, targetDays: year.startDays, samples: result.snapshots)
+                let frames = try await worker.seekLive(scenario: result.scenario, targetDays: timeDays, samples: result.snapshots)
                 guard sessionToken == token else { return }
                 trails = [:]
                 for frame in frames { appendTrail(frame) }
                 snapshot = frames.last; isReplay = true; activeScenario = result.scenario
-                notice = "第 \(year.year) 年年初轨道 · 从保存状态重新积分定位"
+                notice = "\(label)轨道 · 从保存状态重新积分定位"
             } catch { errorMessage = error.localizedDescription }
         }
     }
@@ -372,11 +421,12 @@ final class WorkspaceStore {
         guard let destination else { return false }
         isSaving = true
         let revision = changeRevision
+        let token = sessionToken
         defer { isSaving = false }
         do {
             let archive = try await makeArchive()
-            let data = try JSONEncoder().encode(archive)
-            try data.write(to: destination, options: .atomic)
+            try await ProjectFileIO.shared.write(archive, to: destination)
+            guard sessionToken == token else { return true }
             projectURL = destination
             if revision == changeRevision { hasUnsavedChanges = false }
             notice = "项目已保存"
@@ -395,17 +445,24 @@ final class WorkspaceStore {
     }
 
     private func load(_ url: URL, recovery: Bool = false) async throws {
-        let archive = try JSONDecoder().decode(ProjectArchive.self, from: Data(contentsOf: url))
+        let archive = try await ProjectFileIO.shared.read(from: url)
         guard archive.formatVersion == 1 else { throw SimulationError.invalidCheckpoint("项目格式版本不受支持。") }
         let issues = archive.draft.validationIssues()
         guard issues.isEmpty else { throw SimulationError.invalidScenario(issues.map(\.message)) }
         stopAll()
         var restoredUpdate: WorkUpdate?
         var restoredLive: SimulationSnapshot?
+        var recoveryWarning: String?
         if let checkpoint = archive.checkpoint {
-            restoredUpdate = try await worker.restore(checkpoint)
-        } else if archive.result == nil {
-            restoredLive = try await worker.prepareLive(archive.activeScenario)
+            do { restoredUpdate = try await worker.restore(checkpoint) }
+            catch {
+                guard archive.result != nil else { throw error }
+                await worker.discardCalendar()
+                recoveryWarning = "已打开保存结果；检查点不兼容或已损坏，可查看与回放，继续历法请重新生成"
+            }
+        } else {
+            await worker.discardCalendar()
+            if archive.result == nil { restoredLive = try await worker.prepareLive(archive.activeScenario) }
         }
         draft = archive.draft; activeScenario = archive.activeScenario; result = archive.result; previousResult = archive.previousResult
         if let update = restoredUpdate {
@@ -419,36 +476,31 @@ final class WorkspaceStore {
         selectedBodyID = draft.bodies.first?.id.uuidString
         projectURL = recovery ? nil : url; trails = [:]; resetToken += 1
         isReplay = result != nil; hasUnsavedChanges = recovery
-        notice = "项目已打开"
+        notice = recoveryWarning ?? (canResume ? "计算保持暂停，可继续计算" : "项目已打开")
     }
 
     private func autosave() async {
         do {
             let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("TrisolarisCalendar/Recovery", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let url = directory.appendingPathComponent(recoveryID + ".trisolaris")
             let archive = try await makeArchive()
-            try JSONEncoder().encode(archive).write(to: url, options: .atomic)
+            try await ProjectFileIO.shared.write(archive, to: url, createDirectory: true)
             UserDefaults.standard.set(url.path, forKey: "lastRecoveryPath")
         } catch { notice = "自动恢复副本写入失败，请手动保存项目" }
     }
 
-    func exportResult(asCSV: Bool) {
+    func exportResult(asCSV: Bool, annualDetails: Bool = false) {
         guard let result else { return }
         let panel = NSSavePanel(); panel.allowedContentTypes = [asCSV ? .commaSeparatedText : .json]
-        panel.nameFieldStringValue = draft.name + (asCSV ? "-万年历.csv" : "-计算结果.json")
+        panel.nameFieldStringValue = result.scenario.name + (asCSV ? (annualDetails ? "-年度明细.csv" : "-纪元区间.csv") : "-计算结果.json")
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            if asCSV {
-                var rows = ["年份,纪元,已完成,恒纪元占比,最低模型温度_C,最高模型温度_C,最低辐照_地球倍数,最高辐照_地球倍数,标准年_日"]
-                rows += result.years.map { "\($0.year),\($0.kind == .stable ? "恒纪元" : "乱纪元"),\($0.isComplete),\($0.stableFraction),\($0.minimumTemperatureC),\($0.maximumTemperatureC),\($0.minimumFluxEarth),\($0.maximumFluxEarth),\(result.standardYearDays)" }
-                try ("\u{FEFF}" + rows.joined(separator: "\n")).write(to: url, atomically: true, encoding: .utf8)
-            } else {
-                let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                try encoder.encode(result).write(to: url, options: .atomic)
-            }
-            notice = "结果已导出"
-        } catch { errorMessage = error.localizedDescription }
+        notice = "正在导出结果"
+        Task {
+            do {
+                try await ProjectFileIO.shared.export(result, to: url, asCSV: asCSV, annualDetails: annualDetails)
+                notice = "结果已导出"
+            } catch { errorMessage = error.localizedDescription }
+        }
     }
 
     func requestScenePNG() {

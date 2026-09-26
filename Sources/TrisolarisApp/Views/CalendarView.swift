@@ -5,6 +5,8 @@ struct CalendarView: View {
     @Bindable var store: WorkspaceStore
     @State private var query = ""
     @State private var filter = "all"
+    @State private var displayMode = "epochs"
+    @State private var selectedEpochID: Double?
     private var years: [CalendarYear] { store.result?.years ?? [] }
     private var filteredYears: [CalendarYear] {
         years.filter { row in
@@ -13,6 +15,19 @@ struct CalendarView: View {
         }
     }
     private var selected: CalendarYear? { years.first { $0.year == store.selectedYear } }
+    private var epochRows: [EpochInterval] {
+        (store.result?.intervals ?? []).filter { interval in
+            let matchesKind = filter == "all" || interval.kind.rawValue == filter
+            guard matchesKind else { return false }
+            guard !query.isEmpty else { return true }
+            guard let year = Int(query), year > 0 else { return false }
+            let yearStart = Double(year-1)*store.standardYearDays
+            return interval.startDays < yearStart+store.standardYearDays && interval.endDays > yearStart
+        }
+    }
+    private var longestStable: Double {
+        store.result?.intervals.filter { $0.kind == .stable }.map { ($0.endDays-$0.startDays)/store.standardYearDays }.max() ?? 0
+    }
 
     var body: some View {
         if years.isEmpty && !store.isComputing {
@@ -29,25 +44,51 @@ struct CalendarView: View {
             VStack(spacing: 0) {
                 HStack(spacing: 20) {
                     MetricTile(title: "已完成年份", value: store.totalCompletedYears.formatted(), unit: "年")
-                    MetricTile(title: "全年恒纪元", value: store.stableYears.formatted(), unit: "年", tint: ObservatoryPalette.mint)
+                    MetricTile(title: "最长连续恒纪元", value: longestStable.display(1), unit: "年", tint: ObservatoryPalette.mint)
                     MetricTile(title: "稳定时间占比", value: store.stablePercentage.display(1), unit: "%", tint: ObservatoryPalette.amber)
                 }.padding(22)
                 timeline.padding(.horizontal, 22).padding(.bottom, 18)
                 Divider()
                 HStack(spacing: 12) {
-                    TextField("查找年份", text: $query).textFieldStyle(.roundedBorder).frame(width: 135)
+                    TextField("定位年份", text: $query).textFieldStyle(.roundedBorder).frame(width: 100)
                     Picker("筛选", selection: $filter) {
                         Text("全部").tag("all")
                         Text("恒纪元").tag("stable")
                         Text("乱纪元").tag("chaotic")
-                    }.pickerStyle(.segmented).frame(maxWidth: 230)
+                    }.pickerStyle(.segmented).frame(maxWidth: 185)
                     Spacer()
+                    Picker("显示方式", selection: $displayMode) {
+                        Text("纪元区间").tag("epochs")
+                        Text("逐年明细").tag("years")
+                    }.labelsHidden().frame(width: 115)
                     Menu {
-                        Button("导出年度 CSV…") { store.exportResult(asCSV: true) }
+                        Button("导出纪元区间 CSV…") { store.exportResult(asCSV: true) }
+                        Button("导出年度明细 CSV…") { store.exportResult(asCSV: true, annualDetails: true) }
                         Button("导出完整 JSON…") { store.exportResult(asCSV: false) }
                     } label: { Label("导出", systemImage: "square.and.arrow.up") }
                 }.padding(.horizontal, 22).padding(.vertical, 12)
-                Table(filteredYears, selection: $store.selectedYear) {
+                if displayMode == "epochs" {
+                    Table(epochRows, selection: $selectedEpochID) {
+                        TableColumn("纪元") { interval in
+                            Label(interval.kind == .stable ? "恒纪元" : "乱纪元", systemImage: interval.kind == .stable ? "sun.max" : "wind")
+                                .foregroundStyle(interval.kind == .stable ? ObservatoryPalette.mint : ObservatoryPalette.coral)
+                        }.width(min: 80, ideal: 90)
+                        TableColumn("覆盖年份") { interval in Text(yearRange(interval)).fontWeight(.medium) }
+                        TableColumn("持续时间") { interval in
+                            Text("\(((interval.endDays-interval.startDays)/store.standardYearDays).display(3)) 年").monospacedDigit()
+                        }.width(min: 105, ideal: 120)
+                        TableColumn("起止标准年") { interval in
+                            Text("\((interval.startDays/store.standardYearDays).display(4)) → \((interval.endDays/store.standardYearDays).display(4))")
+                                .monospacedDigit().foregroundStyle(.secondary)
+                        }
+                    }.font(.system(size: 12))
+                    if let interval = epochRows.first(where: { $0.id == selectedEpochID }) { epochDetail(interval) }
+                    else {
+                        Text("\(epochRows.count) 个连续纪元区间 · 同一纪元自动合并 · 需要时可切换逐年明细")
+                            .font(.system(size: 10)).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(14)
+                    }
+                } else {
+                    Table(filteredYears, selection: $store.selectedYear) {
                     TableColumn("年份") { row in Text(String(format: "%04d", row.year)).monospacedDigit() }.width(min: 65, ideal: 75)
                     TableColumn("纪元") { row in EpochBadge(year: row) }.width(min: 85, ideal: 100)
                     TableColumn("稳定占比") { row in
@@ -60,14 +101,37 @@ struct CalendarView: View {
                     }.width(min: 105, ideal: 115)
                     TableColumn("模型温度 / ℃") { row in Text("\(row.minimumTemperatureC.display(1)) ~ \(row.maximumTemperatureC.display(1))").monospacedDigit().foregroundStyle(.secondary) }
                     TableColumn("总辐照 / F⊕") { row in Text("\(row.minimumFluxEarth.display(3)) ~ \(row.maximumFluxEarth.display(3))").monospacedDigit().foregroundStyle(.secondary) }
-                }.font(.system(size: 11))
-                if let selected { yearDetail(selected) }
-                else {
-                    Text("选择年份查看区间详情 · 点击时间轴快速定位")
-                        .font(.system(size: 10)).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(14)
+                    }.font(.system(size: 11))
+                    if let selected { yearDetail(selected) }
+                    else {
+                        Text("选择年份查看区间详情 · 点击时间轴快速定位")
+                            .font(.system(size: 10)).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(14)
+                    }
                 }
             }
         }
+    }
+
+    private func yearRange(_ interval: EpochInterval) -> String {
+        let first = max(1,Int(floor(interval.startDays/store.standardYearDays))+1)
+        let last = max(first,Int(ceil(interval.endDays/store.standardYearDays-1e-10)))
+        return first == last ? "第 \(first) 年" : "第 \(first) — \(last) 年"
+    }
+
+    private func epochDetail(_ interval: EpochInterval) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("\(yearRange(interval)) · \(interval.kind == .stable ? "恒纪元" : "乱纪元")")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button("回放区间起点") {
+                    store.showOrbit(at: interval.startDays, label: "纪元区间起点")
+                }.disabled(store.isComputing)
+            }
+            Text("持续 \(((interval.endDays-interval.startDays)/store.standardYearDays).display(5)) 标准年，\((interval.endDays-interval.startDays).display(2)) 日。覆盖年份包含可能跨纪元的部分年份；精确边界见起止标准年。")
+                .font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(3)
+            if store.isComputing { Text("计算继续推进时，末端区间仍可能延长或等待稳定时长确认。").font(.system(size: 10)).foregroundStyle(.secondary) }
+        }.padding(18).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary.opacity(0.25))
     }
 
     private var timeline: some View {
@@ -95,6 +159,7 @@ struct CalendarView: View {
                         guard !years.isEmpty else { return }
                         let index = min(years.count - 1, max(0, Int(event.location.x / max(1, geometry.size.width) * Double(years.count))))
                         store.selectedYear = years[index].year
+                        selectedEpochID = store.result?.intervals.first { $0.startDays <= years[index].startDays && $0.endDays > years[index].startDays }?.id
                     })
             }.frame(height: 30)
             HStack { Text("第 1 年"); Spacer(); Text("每列按实际时长汇总"); Spacer(); Text("第 \(years.count.formatted()) 年") }

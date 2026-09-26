@@ -1,5 +1,55 @@
 import Foundation
 
+/// Stable raw values keep the existing preset and seeded-random entry points compatible.
+public enum OrbitPreset: Int, CaseIterable, Identifiable, Sendable {
+    case quietHierarchy = 0, figureEight = 1, random = 2
+    case compactHierarchy = 3, inclinedHierarchy = 4, eccentricPlanet = 5
+    case circumbinaryPlanet = 6, retrogradePlanet = 7, redDwarfPlanet = 8, distantBinary = 9
+
+    public enum Category: String, CaseIterable, Identifiable, Sendable {
+        case singleStar = "行星绕单星"
+        case binary = "双星与行星"
+        case choreography = "周期与随机"
+        public var id: String { rawValue }
+    }
+    public var id: Int { rawValue }
+    public var category: Category {
+        switch self {
+        case .circumbinaryPlanet, .distantBinary: return .binary
+        case .figureEight, .random: return .choreography
+        default: return .singleStar
+        }
+    }
+    public var title: String {
+        switch self {
+        case .quietHierarchy: return "宁静层级 · 20 / 200 AU"
+        case .compactHierarchy: return "紧凑层级 · 8 / 60 AU"
+        case .inclinedHierarchy: return "倾斜星系 · 55° 伴星轨道"
+        case .eccentricPlanet: return "冷暖长年 · 偏心率 0.60"
+        case .circumbinaryPlanet: return "双日世界 · 行星绕双星"
+        case .retrogradePlanet: return "逆行世界 · 180° 行星轨道"
+        case .redDwarfPlanet: return "红矮星家园 · 约 36 日标准年"
+        case .distantBinary: return "远方双日 · 行星绕远主星"
+        case .figureEight: return "八字共舞 · 等质量三星"
+        case .random: return "混沌星海 · 随机初始轨道"
+        }
+    }
+    public var summary: String {
+        switch self {
+        case .quietHierarchy: return "宽层级三星与近圆地球型行星，便于比较数值精度和历法。"
+        case .compactHierarchy: return "缩短恒星层级尺度，观察比宽层级示例更明显的伴星扰动。"
+        case .inclinedHierarchy: return "行星、内伴星和外伴星处于不同轨道平面，观察三维运动。"
+        case .eccentricPlanet: return "行星从 0.4 AU 到 1.6 AU 往返，展示辐照与温度的周期变化。"
+        case .circumbinaryPlanet: return "0.72 AU 行星环绕一对相距约 0.15 AU 的恒星，第三星远在外层。"
+        case .retrogradePlanet: return "行星绕主星的方向与两颗伴星相反，可与顺行示例比较。"
+        case .redDwarfPlanet: return "低质量、低光度主星与近轨行星，展示标准年的质量和距离依赖。"
+        case .distantBinary: return "B、C 构成紧双星，A 携带行星在其远处运行，展示另一种三星层级。"
+        case .figureEight: return "理想等质量三体的已知周期初值；默认不添加会扰动它的行星。"
+        case .random: return "保留当前天体参数，按种子、空间尺度和动能比例生成初值。"
+        }
+    }
+}
+
 public enum Presets {
     private static let identifiers = [
         UUID(uuidString: "00000000-0000-4000-8000-000000000001")!,
@@ -16,6 +66,21 @@ public enum Presets {
                       radiusAU: Astronomy.earthRadiusAU)
     }
 
+    public static func scenario(for preset: OrbitPreset, seed: UInt64 = 42) -> Scenario {
+        switch preset {
+        case .quietHierarchy: return stableHierarchy()
+        case .figureEight: return figureEight(includePlanet: false)
+        case .random: return random(seed: seed)
+        case .compactHierarchy: return compactHierarchy()
+        case .inclinedHierarchy: return inclinedHierarchy()
+        case .eccentricPlanet: return eccentricPlanet()
+        case .circumbinaryPlanet: return circumbinaryPlanet()
+        case .retrogradePlanet: return retrogradePlanet()
+        case .redDwarfPlanet: return redDwarfPlanet()
+        case .distantBinary: return distantBinary()
+        }
+    }
+
     /// A deliberately widely separated hierarchy. Stability is a numerical property to be checked, not guaranteed.
     public static func stableHierarchy(includePlanet: Bool = true) -> Scenario {
         var a = [star(0, mass: 1, radius: 1, luminosity: 1)]
@@ -29,6 +94,120 @@ public enum Presets {
         a.sort { $0.kind == $1.kind ? $0.name < $1.name : $0.kind == .star }
         return Scenario(name: "宁静的层级三星", bodies: a, referenceStarID: identifiers[0],
                         notes: "地球型行星绕太阳型主星；伴星相对半长轴为 20、200 AU。强层级初值是长期稳定候选，实际结论以本次积分为准。")
+    }
+
+    public static func compactHierarchy(includePlanet: Bool = true) -> Scenario {
+        var bodies = [star(0, mass: 1, radius: 1, luminosity: 1)]
+        if includePlanet {
+            bodies = combine(bodies, [earth()], semiMajorAxis: 1, eccentricity: 0.025,
+                             inclinationDegrees: 0, trueAnomalyDegrees: 45)
+        }
+        bodies = combine(bodies, [star(1, mass: 0.65, radius: 0.67, luminosity: 0.16)],
+                         semiMajorAxis: 8, eccentricity: 0.12, inclinationDegrees: 4, trueAnomalyDegrees: 150)
+        bodies = combine(bodies, [star(2, mass: 0.45, radius: 0.46, luminosity: 0.035)],
+                         semiMajorAxis: 60, eccentricity: 0.12, inclinationDegrees: 12, trueAnomalyDegrees: 65)
+        return example(name: "紧凑的层级三星", bodies: bodies,
+                       notes: "行星半长轴 1 AU；两级恒星相对半长轴 8、60 AU，偏心率均为 0.12。相比宽层级示例，伴星扰动更明显，可比较轨道与辐照的长期变化。")
+    }
+
+    public static func inclinedHierarchy(includePlanet: Bool = true) -> Scenario {
+        var bodies = [star(0, mass: 1, radius: 1, luminosity: 1)]
+        if includePlanet {
+            bodies = combine(bodies, [earth()], semiMajorAxis: 1, eccentricity: 0.03,
+                             inclinationDegrees: 0, trueAnomalyDegrees: 30)
+        }
+        bodies = combine(bodies, [star(1, mass: 0.7, radius: 0.7, luminosity: 0.2)],
+                         semiMajorAxis: 18, eccentricity: 0.15, inclinationDegrees: 55,
+                         trueAnomalyDegrees: 100, ascendingNodeDegrees: 35)
+        bodies = combine(bodies, [star(2, mass: 0.5, radius: 0.5, luminosity: 0.05)],
+                         semiMajorAxis: 150, eccentricity: 0.1, inclinationDegrees: 25,
+                         trueAnomalyDegrees: 210, ascendingNodeDegrees: 120)
+        return example(name: "交错的轨道平面", bodies: bodies,
+                       notes: "以行星初始平面为参考：B 的相对轨道倾角 55°、升交点 35°，C 的轨道倾角 25°、升交点 120°。适合旋转三维视图观察；长时倾角和偏心率耦合需由积分检验。")
+    }
+
+    public static func eccentricPlanet(includePlanet: Bool = true) -> Scenario {
+        var bodies = [star(0, mass: 1, radius: 1, luminosity: 1)]
+        if includePlanet {
+            bodies = combine(bodies, [earth()], semiMajorAxis: 1, eccentricity: 0.60,
+                             inclinationDegrees: 0, trueAnomalyDegrees: 180)
+        }
+        bodies = combine(bodies, [star(1, mass: 0.7, radius: 0.7, luminosity: 0.2)],
+                         semiMajorAxis: 30, eccentricity: 0.1, inclinationDegrees: 0, trueAnomalyDegrees: 90)
+        bodies = combine(bodies, [star(2, mass: 0.5, radius: 0.5, luminosity: 0.05)],
+                         semiMajorAxis: 240, eccentricity: 0.1, inclinationDegrees: 6, trueAnomalyDegrees: 240)
+        return example(name: "冷暖交替的长年", bodies: bodies,
+                       notes: "行星半长轴 1 AU、偏心率 0.60，从远星点出发；初始二体近、远星点为 0.4、1.6 AU。仅主星辐照即约为地球的 6.25 至 0.39 倍，适合观察热惯性和恒乱纪元切换。")
+    }
+
+    public static func circumbinaryPlanet(includePlanet: Bool = true) -> Scenario {
+        var bodies = combine([star(0, mass: 0.75, radius: 0.76, luminosity: 0.32)],
+                             [star(1, mass: 0.65, radius: 0.67, luminosity: 0.16)],
+                             semiMajorAxis: 0.15, eccentricity: 0.05,
+                             inclinationDegrees: 0, trueAnomalyDegrees: 40)
+        if includePlanet {
+            bodies = combine(bodies, [earth()], semiMajorAxis: 0.72, eccentricity: 0.02,
+                             inclinationDegrees: 2, trueAnomalyDegrees: 150)
+        }
+        bodies = combine(bodies, [star(2, mass: 0.35, radius: 0.36, luminosity: 0.015)],
+                         semiMajorAxis: 35, eccentricity: 0.1, inclinationDegrees: 8, trueAnomalyDegrees: 250)
+        return example(name: "双日下的环双星行星", bodies: bodies, referenceDistanceAU: sqrt(0.32),
+                       notes: "A、B 的相对半长轴为 0.15 AU，行星绕双星质心的初始半长轴为 0.72 AU，C 在 35 AU 外层。标准年仍固定采用 A 与其地球等辐照距离 √0.32 AU 的二体参考年，不等于行星绕双星的实际周期。")
+    }
+
+    public static func retrogradePlanet(includePlanet: Bool = true) -> Scenario {
+        var bodies = [star(0, mass: 1, radius: 1, luminosity: 1)]
+        if includePlanet {
+            bodies = combine(bodies, [earth()], semiMajorAxis: 1, eccentricity: 0.025,
+                             inclinationDegrees: 180, trueAnomalyDegrees: 45)
+        }
+        bodies = combine(bodies, [star(1, mass: 0.8, radius: 0.8, luminosity: 0.4)],
+                         semiMajorAxis: 12, eccentricity: 0.15, inclinationDegrees: 0, trueAnomalyDegrees: 120)
+        bodies = combine(bodies, [star(2, mass: 0.5, radius: 0.5, luminosity: 0.05)],
+                         semiMajorAxis: 100, eccentricity: 0.1, inclinationDegrees: 10, trueAnomalyDegrees: 250)
+        return example(name: "逆行于群星之间", bodies: bodies,
+                       notes: "行星相对于 B 的轨道平面倾角为 180°，因此绕 A 逆行；两级恒星相对半长轴为 12、100 AU。逆行仅改变初始轨道方向，不能据此保证系统长期稳定。")
+    }
+
+    public static func redDwarfPlanet(includePlanet: Bool = true) -> Scenario {
+        let referenceDistance = sqrt(0.025)
+        var bodies = [star(0, mass: 0.4, radius: 0.4, luminosity: 0.025)]
+        if includePlanet {
+            bodies = combine(bodies, [earth()], semiMajorAxis: referenceDistance, eccentricity: 0.01,
+                             inclinationDegrees: 0, trueAnomalyDegrees: 45)
+        }
+        bodies = combine(bodies, [star(1, mass: 0.3, radius: 0.31, luminosity: 0.012)],
+                         semiMajorAxis: 3, eccentricity: 0.08, inclinationDegrees: 3, trueAnomalyDegrees: 135)
+        bodies = combine(bodies, [star(2, mass: 0.2, radius: 0.22, luminosity: 0.004)],
+                         semiMajorAxis: 25, eccentricity: 0.1, inclinationDegrees: 8, trueAnomalyDegrees: 230)
+        return example(name: "红矮星的短年", bodies: bodies, referenceDistanceAU: referenceDistance,
+                       notes: "主星为 0.4 个太阳质量、0.025 个太阳光度；行星参考距离 √0.025 ≈ 0.158 AU，标准年约 36 日。展示引力尺度与历法尺度的关系；未加入潮汐锁定、耀斑和光谱气候模型，不能据此判定真实红矮星宜居性。")
+    }
+
+    public static func distantBinary(includePlanet: Bool = true) -> Scenario {
+        var primary = [star(0, mass: 1, radius: 1, luminosity: 1)]
+        if includePlanet {
+            primary = combine(primary, [earth()], semiMajorAxis: 1, eccentricity: 0.02,
+                              inclinationDegrees: 0, trueAnomalyDegrees: 30)
+        }
+        let binary = combine([star(1, mass: 0.65, radius: 0.67, luminosity: 0.16)],
+                             [star(2, mass: 0.55, radius: 0.56, luminosity: 0.07)],
+                             semiMajorAxis: 0.2, eccentricity: 0.08,
+                             inclinationDegrees: 20, trueAnomalyDegrees: 100, ascendingNodeDegrees: 45)
+        let bodies = combine(primary, binary, semiMajorAxis: 20, eccentricity: 0.12,
+                             inclinationDegrees: 7, trueAnomalyDegrees: 230)
+        return example(name: "远方的紧双星", bodies: bodies,
+                       notes: "B、C 形成相对半长轴 0.2 AU 的紧双星；A 与它们的质心相距约 20 AU，并携带 1 AU 行星。与环双星行星示例对照，可观察围绕单星与围绕双星质心的不同结构。")
+    }
+
+    private static func example(name: String, bodies: [CelestialBody], referenceDistanceAU: Double = 1,
+                                notes: String) -> Scenario {
+        var centered = bodies
+        recenter(&centered)
+        centered.sort { $0.kind == $1.kind ? $0.name < $1.name : $0.kind == .star }
+        return Scenario(name: name, bodies: centered, referenceStarID: identifiers[0],
+                        referenceDistanceAU: referenceDistanceAU,
+                        notes: notes + " 本示例是自洽的层级开普勒初值，恒星参数为教学示例；短期数值检查不构成万年稳定证明。")
     }
 
     public static func figureEight(includePlanet: Bool = true, scaleAU: Double = 10) -> Scenario {
@@ -143,13 +322,18 @@ public enum Presets {
     }
 
     private static func combine(_ left: [CelestialBody], _ right: [CelestialBody], semiMajorAxis a: Double,
-                                eccentricity e: Double, inclinationDegrees: Double, trueAnomalyDegrees: Double) -> [CelestialBody] {
+                                eccentricity e: Double, inclinationDegrees: Double, trueAnomalyDegrees: Double,
+                                ascendingNodeDegrees: Double = 0) -> [CelestialBody] {
         let lm = left.reduce(0) { $0+$1.massSolar }, rm = right.reduce(0) { $0+$1.massSolar }
         let f = trueAnomalyDegrees * .pi/180, inc = inclinationDegrees * .pi/180
         let p = a*(1-e*e), distance = p/(1+e*cos(f))
-        let r = Vector3(distance*cos(f), distance*sin(f)*cos(inc), distance*sin(f)*sin(inc))
+        let node = ascendingNodeDegrees * .pi/180
+        func rotateNode(_ value: Vector3) -> Vector3 {
+            Vector3(value.x*cos(node)-value.y*sin(node), value.x*sin(node)+value.y*cos(node), value.z)
+        }
+        let r = rotateNode(Vector3(distance*cos(f), distance*sin(f)*cos(inc), distance*sin(f)*sin(inc)))
         let vScale = sqrt(Astronomy.gravitationalConstant*(lm+rm)/p)
-        let v = Vector3(-sin(f), (e+cos(f))*cos(inc), (e+cos(f))*sin(inc))*vScale
+        let v = rotateNode(Vector3(-sin(f), (e+cos(f))*cos(inc), (e+cos(f))*sin(inc)))*vScale
         func moved(_ bodies: [CelestialBody], fraction: Double) -> [CelestialBody] {
             bodies.map { original in
                 var body = original

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="1.0.0"
+VERSION="1.1.0"
 APP_NAME="三体人的万年历"
 APP_BUNDLE="$ROOT_DIR/dist/$APP_NAME.app"
 DMG_NAME="TrisolarisCalendar-v$VERSION-macos-arm64.dmg"
@@ -64,7 +64,7 @@ mounted=false
 
 source_root="$work_dir/$SOURCE_ROOT_NAME"
 /bin/mkdir -p "$source_root"
-for entry in Package.swift README.md LICENSE THIRD_PARTY_NOTICES.md .gitignore Resources Sources Tests Vendor script; do
+for entry in Package.swift README.md LICENSE THIRD_PARTY_NOTICES.md .gitignore Resources Sources Tests Vendor script Examples Validation; do
   /usr/bin/rsync -a --exclude '.DS_Store' "$ROOT_DIR/$entry" "$source_root/"
 done
 /usr/bin/ditto --norsrc -c -k --keepParent "$source_root" "$work_dir/$SOURCE_NAME"

@@ -60,7 +60,8 @@ struct ObservatoryCommands: Commands {
             Button("保存项目") { Task { await store?.saveProject() } }.keyboardShortcut("s")
             Button("项目另存为…") { Task { await store?.saveProject(saveAs: true) } }.keyboardShortcut("s", modifiers: [.command, .shift])
             Divider()
-            Button("导出万年历 CSV…") { store?.exportResult(asCSV: true) }.disabled(store?.result == nil)
+            Button("导出纪元区间 CSV…") { store?.exportResult(asCSV: true) }.disabled(store?.result == nil)
+            Button("导出年度明细 CSV…") { store?.exportResult(asCSV: true, annualDetails: true) }.disabled(store?.result == nil)
             Button("导出完整结果 JSON…") { store?.exportResult(asCSV: false) }.disabled(store?.result == nil)
             Button("导出三维场景 PNG…") { store?.requestScenePNG() }
         }

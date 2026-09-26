@@ -32,7 +32,8 @@ let package = Package(
             linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("MetalKit")]
         ),
         .executableTarget(name: "ScienceCheck", dependencies: ["SimulationCore"]),
-        .testTarget(name: "SimulationCoreTests", dependencies: ["SimulationCore"])
+        .testTarget(name: "SimulationCoreTests", dependencies: ["SimulationCore"]),
+        .testTarget(name: "TrisolarisAppTests", dependencies: ["TrisolarisApp", "SimulationCore"])
     ],
     swiftLanguageModes: [.v6],
     cLanguageStandard: .c99

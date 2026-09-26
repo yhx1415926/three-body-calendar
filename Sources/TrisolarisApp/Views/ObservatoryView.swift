@@ -68,16 +68,36 @@ struct ObservatoryView: View {
                 Button { store.step() } label: { Image(systemName: "forward.frame.fill") }.help("向前推进 1/128 标准年")
                 Divider().frame(height: 18)
                 Text("速度").font(.system(size: 10)).foregroundStyle(.secondary)
-                Picker("播放速度", selection: $store.playbackRate) {
+                Picker("播放速度", selection: Binding(get: { store.usesManualPlaybackRate ? -1.0 : store.playbackRate }, set: { rate in
+                    if rate < 0 { store.setManualPlaybackPosition(store.manualPlaybackPosition) }
+                    else { store.usesManualPlaybackRate = false; store.playbackRate = rate }
+                })) {
                     Text("0.03 年/秒").tag(0.03)
                     Text("0.12 年/秒").tag(0.12)
                     Text("1 年/秒").tag(1.0)
                     Text("10 年/秒").tag(10.0)
+                    Text("手动滑轨").tag(-1.0)
                 }.labelsHidden().frame(width: 112)
                 Spacer()
                 if store.isReplay { Text("离散采样回放").font(.system(size: 10)).foregroundStyle(ObservatoryPalette.amber) }
                 Toggle("网格", isOn: $showGrid).toggleStyle(.checkbox).font(.system(size: 10))
             }.buttonStyle(.borderless).disabled(store.isComputing)
+            HStack(spacing: 10) {
+                Text("手动速度").font(.system(size: 10)).foregroundStyle(store.usesManualPlaybackRate ? .primary : .secondary)
+                Text("0.003").font(.system(size: 9, design: .monospaced)).foregroundStyle(.tertiary)
+                Slider(value: Binding(get: { PlaybackSampling.sliderPosition(for: store.playbackRate) }, set: { store.setManualPlaybackPosition($0) }), in: 0...1)
+                    .tint(ObservatoryPalette.mint)
+                    .help("对数调速：左侧精细慢放，右侧快速推进；轨迹始终以相同物理间隔采样。")
+                    .accessibilityLabel("手动播放速度")
+                    .accessibilityValue("每秒 \(store.playbackRate.display(3)) 标准年")
+                Text("30").font(.system(size: 9, design: .monospaced)).foregroundStyle(.tertiary)
+                Text("\(store.playbackRate.display(3)) 年/秒").font(.system(size: 10, design: .monospaced)).frame(width: 105, alignment: .trailing)
+            }.disabled(store.isComputing)
+            HStack {
+                Text("轨迹保留最近 \(store.trailRetentionYears.display(1)) 标准年 · 当前速度约 \((store.trailRetentionYears / max(store.playbackRate, 0.003)).display(1)) 秒消退")
+                    .font(.system(size: 9)).foregroundStyle(.tertiary)
+                Spacer()
+            }
             if let samples = store.result?.snapshots, samples.count > 1 {
                 HStack {
                     Text("历法回放").font(.system(size: 10)).foregroundStyle(.secondary)

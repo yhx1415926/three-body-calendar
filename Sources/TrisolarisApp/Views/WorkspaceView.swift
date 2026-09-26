@@ -21,7 +21,7 @@ struct WorkspaceView: View {
                     case .analysis: AnalysisView(store: store)
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                statusBar
+                WorkspaceStatusBar(store: store)
             }
             .inspector(isPresented: $showInspector) {
                 InspectorView(store: store)
@@ -67,9 +67,14 @@ struct WorkspaceView: View {
     @ToolbarContentBuilder private var workspaceToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .automatic) {
             Menu {
-                Button("层级三星 · 宜居行星") { store.choosePreset(0) }
-                Button("八字周期 · 三星") { store.choosePreset(1) }
-                Button("随机初始轨道") { store.choosePreset(2) }
+                ForEach(OrbitPreset.Category.allCases) { category in
+                    Section(category.rawValue) {
+                        ForEach(OrbitPreset.allCases.filter { $0.category == category }) { preset in
+                            Button(preset.title) { store.choosePreset(preset.rawValue) }
+                                .help(preset.summary)
+                        }
+                    }
+                }
             } label: { Label("初始轨道", systemImage: "square.stack.3d.up") }
             .disabled(store.isComputing)
             Button { store.openProject() } label: { Label("打开", systemImage: "folder") }
@@ -92,7 +97,11 @@ struct WorkspaceView: View {
         }
     }
 
-    private var statusBar: some View {
+}
+
+private struct WorkspaceStatusBar: View {
+    let store: WorkspaceStore
+    var body: some View {
         VStack(spacing: 0) {
             if store.isComputing { ProgressView(value: store.progress?.fraction ?? 0).progressViewStyle(.linear).tint(ObservatoryPalette.mint) }
             HStack(spacing: 8) {

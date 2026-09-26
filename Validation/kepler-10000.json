@@ -1,0 +1,19 @@
+{
+  "checks" : [
+    {
+      "eccentricity" : 0,
+      "maximumAngularMomentumError" : 4.2266603714036808e-15,
+      "maximumEnergyError" : 2.7921103990763719e-15,
+      "periods" : 10000,
+      "positionErrorAU" : 2.9220265215534375e-07
+    },
+    {
+      "eccentricity" : 0.59999999999999998,
+      "maximumAngularMomentumError" : 1.0086348613576966e-14,
+      "maximumEnergyError" : 4.7569288280560416e-15,
+      "periods" : 10000,
+      "positionErrorAU" : 4.1839311856078833e-10
+    }
+  ],
+  "elapsedSeconds" : 2.0350780487060547
+}

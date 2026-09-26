@@ -256,6 +256,7 @@ final class OrbitMetalView: MTKView {
     }
 
     func updateLabels(_ projected: [OrbitProjectedBody]) {
+        var occupied: [CGRect] = []
         let currentIDs = Set(projected.map(\.id))
         for id in Array(labels.keys) where !currentIDs.contains(id) {
             labels.removeValue(forKey: id)?.removeFromSuperview()
@@ -282,6 +283,10 @@ final class OrbitMetalView: MTKView {
                                       blue: CGFloat(body.color.z), alpha: body.isSelected ? 1 : 0.75)
             label.frame.origin = NSPoint(x: body.point.x + max(body.radius, 4) + 8,
                                          y: body.point.y - label.frame.height / 2)
+            for _ in 0..<8 where occupied.contains(where: { $0.insetBy(dx: -4, dy: -3).intersects(label.frame) }) {
+                label.frame.origin.y += label.frame.height+5
+            }
+            occupied.append(label.frame)
             label.isHidden = !bounds.intersects(label.frame)
         }
     }
