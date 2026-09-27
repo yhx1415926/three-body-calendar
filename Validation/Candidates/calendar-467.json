@@ -1,0 +1,37 @@
+{
+  "closeVisits" : [
+    {
+      "star" : "恒星 C",
+      "year" : 280.202625700927
+    },
+    {
+      "star" : "恒星 B",
+      "year" : 261.69404152016995
+    },
+    {
+      "star" : "恒星 A",
+      "year" : 0.001953125
+    }
+  ],
+  "completedYears" : 10000,
+  "elapsedSeconds" : 102.6686840057373,
+  "engine" : "REBOUND 4.4.11 · IAS15 \/ PRS23",
+  "events" : [
+
+  ],
+  "habitableDurationYears" : 38.927437326914962,
+  "intervals" : 300,
+  "maximumAngularMomentumError" : 1.6460667388440239e-11,
+  "maximumEnergyError" : 1.4387683070206284e-10,
+  "maximumPlanetEccentricity" : 31566.026907428939,
+  "maximumPlanetSemimajorAxisAU" : 8704.2358129156546,
+  "minimumPlanetSemimajorAxisAU" : -80126.849535232148,
+  "normalizedAngularMomentumError" : 1.6460667388440239e-11,
+  "normalizedEnergyError" : 3.4737121979069475e-11,
+  "simulatedStandardYears" : 10000.099999999999,
+  "snapshots" : 4094,
+  "stableYears" : 12,
+  "status" : "completed",
+  "tolerance" : 1.0000000000000001e-09,
+  "years" : 10000
+}

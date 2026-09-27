@@ -6,7 +6,9 @@ import UniformTypeIdentifiers
 
 @MainActor @Observable
 final class WorkspaceStore {
-    var draft = Presets.stableHierarchy()
+    var draft = Presets.stableHierarchy() {
+        didSet { if draft != oldValue { edited() } }
+    }
     var activeScenario = Presets.stableHierarchy()
     var page: WorkspacePage = .observatory
     var selectedBodyID: String?
@@ -19,6 +21,7 @@ final class WorkspaceStore {
     var isComputing = false
     var canResume = false
     var isSaving = false
+    var isLoading = false
     var hasUnsavedChanges = false
     var playbackRate = 0.12
     var usesManualPlaybackRate = false
@@ -96,7 +99,7 @@ final class WorkspaceStore {
     func edited() { hasUnsavedChanges = true; changeRevision &+= 1 }
 
     func choosePreset(_ index: Int, seed: UInt64 = UInt64.random(in: 1...UInt64.max)) {
-        guard let preset = OrbitPreset(rawValue: index) else { return }
+        guard !isLoading, let preset = OrbitPreset(rawValue: index) else { return }
         stopAll()
         if let result { previousResult = result }
         result = nil; progress = nil; canResume = false; verificationSummary = nil
@@ -108,6 +111,7 @@ final class WorkspaceStore {
     }
 
     func resetSimulation(markDirty: Bool = true) async {
+        guard !isLoading else { return }
         guard !isComputing else { notice = "请先暂停历法计算，再应用新的初始条件"; return }
         guard validationMessages.isEmpty else { errorMessage = validationMessages.joined(separator: "\n"); return }
         stopPlayback()
@@ -123,6 +127,7 @@ final class WorkspaceStore {
     }
 
     func togglePlayback() {
+        guard !isLoading else { return }
         if isPlaying { stopPlayback(); return }
         if isComputing { notice = "历法正在计算，可在完成后回放"; return }
         Task {
@@ -170,6 +175,7 @@ final class WorkspaceStore {
     }
 
     func step() {
+        guard !isLoading else { return }
         stopPlayback()
         guard !isComputing else { return }
         Task {
@@ -193,6 +199,7 @@ final class WorkspaceStore {
     }
 
     func startCalendar(strict: Bool = false) {
+        guard !isLoading else { return }
         guard !isComputing else { return }
         guard validationMessages.isEmpty else { errorMessage = validationMessages.joined(separator: "\n"); return }
         guard draft.planet != nil else { errorMessage = "请先添加一颗行星，再生成万年历。"; return }
@@ -231,7 +238,7 @@ final class WorkspaceStore {
     }
 
     func resumeCalendar() {
-        guard canResume, !isComputing else { return }
+        guard !isLoading, canResume, !isComputing else { return }
         stopPlayback(); isComputing = true; canResume = false; notice = "继续计算万年历"
         if let result { activeScenario = result.scenario }
         isReplay = false
@@ -241,6 +248,7 @@ final class WorkspaceStore {
     }
 
     func cancelCalendar() {
+        guard !isLoading else { return }
         calculationTask?.cancel(); calculationTask = nil
         isComputing = false; canResume = false; notice = "计算已取消，已完成年份已保留"
         let token = sessionToken
@@ -251,6 +259,7 @@ final class WorkspaceStore {
     }
 
     func extendCalendar() {
+        guard !isLoading else { return }
         guard let result, draft.durationYears > result.scenario.durationYears else { return }
         var candidate = draft; candidate.durationYears = result.scenario.durationYears
         guard candidate == result.scenario else { errorMessage = "延长计算要求除年数以外的参数与原结果一致。请还原其他改动，或开始新的计算。"; return }
@@ -329,7 +338,7 @@ final class WorkspaceStore {
     }
 
     func showOrbit(at timeDays: Double, label: String) {
-        guard !isComputing, let result, !result.snapshots.isEmpty else { return }
+        guard !isLoading, !isComputing, let result, !result.snapshots.isEmpty else { return }
         stopPlayback(); page = .observatory; notice = "正在恢复\(label)的轨道"
         let token = sessionToken
         Task {
@@ -345,7 +354,7 @@ final class WorkspaceStore {
     }
 
     func seekReplay(_ index: Double) {
-        guard !isComputing, let samples = result?.snapshots, !samples.isEmpty else { return }
+        guard !isLoading, !isComputing, let samples = result?.snapshots, !samples.isEmpty else { return }
         stopPlayback(); isReplay = true
         let i = min(samples.count - 1, max(0, Int(index.rounded())))
         replayIndex = Double(i); snapshot = samples[i]; trails = [:]
@@ -362,7 +371,7 @@ final class WorkspaceStore {
     }
 
     func addOrRemovePlanet() {
-        guard !isComputing else { return }
+        guard !isLoading, !isComputing else { return }
         if let planet = draft.planet { draft.bodies.removeAll { $0.id == planet.id } }
         else if let star = draft.referenceStar {
             let radius = draft.referenceDistanceAU
@@ -397,6 +406,7 @@ final class WorkspaceStore {
     }
 
     func openProject(at url: URL) {
+        guard !isLoading else { return }
         Task {
             if hasUnsavedChanges {
                 let alert = NSAlert(); alert.messageText = "打开另一个项目前保存当前项目？"
@@ -411,6 +421,7 @@ final class WorkspaceStore {
     }
 
     @discardableResult func saveProject(saveAs: Bool = false) async -> Bool {
+        guard !isLoading, !isSaving else { return false }
         var destination = projectURL
         if saveAs || destination == nil {
             let panel = NSSavePanel(); panel.allowedContentTypes = [UTType(filenameExtension: "trisolaris") ?? .json]
@@ -445,11 +456,17 @@ final class WorkspaceStore {
     }
 
     private func load(_ url: URL, recovery: Bool = false) async throws {
+        stopAll()
+        let token = sessionToken
+        isLoading = true
+        notice = "正在读取项目与历法…"
+        defer { isLoading = false }
         let archive = try await ProjectFileIO.shared.read(from: url)
+        guard token == sessionToken, !Task.isCancelled else { throw CancellationError() }
         guard archive.formatVersion == 1 else { throw SimulationError.invalidCheckpoint("项目格式版本不受支持。") }
         let issues = archive.draft.validationIssues()
         guard issues.isEmpty else { throw SimulationError.invalidScenario(issues.map(\.message)) }
-        stopAll()
+        notice = "正在恢复计算状态…"
         var restoredUpdate: WorkUpdate?
         var restoredLive: SimulationSnapshot?
         var recoveryWarning: String?
@@ -464,6 +481,7 @@ final class WorkspaceStore {
             await worker.discardCalendar()
             if archive.result == nil { restoredLive = try await worker.prepareLive(archive.activeScenario) }
         }
+        guard token == sessionToken, !Task.isCancelled else { throw CancellationError() }
         draft = archive.draft; activeScenario = archive.activeScenario; result = archive.result; previousResult = archive.previousResult
         if let update = restoredUpdate {
             accept(update); canResume = update.progress.status == .running || update.progress.status == .ready

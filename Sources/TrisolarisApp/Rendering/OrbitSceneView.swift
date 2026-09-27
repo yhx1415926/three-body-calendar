@@ -105,7 +105,6 @@ final class OrbitMetalView: MTKView {
     private var hasDragged = false
     private var tracking: NSTrackingArea?
     private var drawableResizeTask: Task<Void, Never>?
-    private var labels: [String: NSTextField] = [:]
 
     init() {
         let metalDevice = MTLCreateSystemDefaultDevice()
@@ -236,6 +235,7 @@ final class OrbitMetalView: MTKView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command) { super.keyDown(with: event); return }
         switch event.keyCode {
         case 123: renderer?.rotate(deltaX: -12, deltaY: 0)
         case 124: renderer?.rotate(deltaX: 12, deltaY: 0)
@@ -255,43 +255,6 @@ final class OrbitMetalView: MTKView {
         needsDisplay = true
     }
 
-    func updateLabels(_ projected: [OrbitProjectedBody]) {
-        var occupied: [CGRect] = []
-        let currentIDs = Set(projected.map(\.id))
-        for id in Array(labels.keys) where !currentIDs.contains(id) {
-            labels.removeValue(forKey: id)?.removeFromSuperview()
-        }
-        for body in projected {
-            let label: NSTextField
-            if let existing = labels[body.id] { label = existing }
-            else {
-                label = NSTextField(labelWithString: body.name)
-                label.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
-                label.isSelectable = false
-                label.isEditable = false
-                label.isBezeled = false
-                label.drawsBackground = false
-                label.setAccessibilityElement(false)
-                addSubview(label)
-                labels[body.id] = label
-            }
-            if label.stringValue != body.name || label.frame.width == 0 {
-                label.stringValue = body.name
-                label.sizeToFit()
-            }
-            label.textColor = NSColor(red: CGFloat(body.color.x), green: CGFloat(body.color.y),
-                                      blue: CGFloat(body.color.z), alpha: body.isSelected ? 1 : 0.75)
-            label.frame.origin = NSPoint(x: body.point.x + max(body.radius, 4) + 8,
-                                         y: body.point.y - label.frame.height / 2)
-            for _ in 0..<8 where occupied.contains(where: { $0.insetBy(dx: -4, dy: -3).intersects(label.frame) }) {
-                label.frame.origin.y += label.frame.height+5
-            }
-            occupied.append(label.frame)
-            label.isHidden = !bounds.intersects(label.frame)
-        }
-    }
-
-    // Text labels are annotations, never independent mouse targets.
     override func hitTest(_ point: NSPoint) -> NSView? {
         bounds.contains(convert(point, from: superview)) ? self : nil
     }

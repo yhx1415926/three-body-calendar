@@ -12,6 +12,8 @@ public enum OrbitPreset: Int, CaseIterable, Identifiable, Sendable {
         case choreography = "周期与随机"
         public var id: String { rawValue }
     }
+    /// The menu keeps one single-host reference; legacy cases remain readable for existing projects.
+    public static var catalog: [OrbitPreset] { [.quietHierarchy, .circumbinaryPlanet, .figureEight, .random] }
     public var id: Int { rawValue }
     public var category: Category {
         switch self {

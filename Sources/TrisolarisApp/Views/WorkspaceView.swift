@@ -28,6 +28,16 @@ struct WorkspaceView: View {
                     .inspectorColumnWidth(min: 270, ideal: 290, max: 340)
             }
         }
+        .disabled(store.isLoading)
+        .overlay {
+            if store.isLoading {
+                VStack(spacing: 12) {
+                    ProgressView().controlSize(.regular)
+                    Text("正在加载项目与万年历…").font(.headline)
+                    Text("计算数据保留完整精度").font(.caption).foregroundStyle(.secondary)
+                }.padding(28).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
         .frame(minWidth: 1120, minHeight: 720)
         .navigationTitle("三体人的万年历")
         .navigationSubtitle(store.draft.name)
@@ -69,7 +79,7 @@ struct WorkspaceView: View {
             Menu {
                 ForEach(OrbitPreset.Category.allCases) { category in
                     Section(category.rawValue) {
-                        ForEach(OrbitPreset.allCases.filter { $0.category == category }) { preset in
+                        ForEach(OrbitPreset.catalog.filter { $0.category == category }) { preset in
                             Button(preset.title) { store.choosePreset(preset.rawValue) }
                                 .help(preset.summary)
                         }

@@ -54,6 +54,7 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
     private var resetToken: Int?
     private var camera = OrbitCamera()
     private var hasFramed = false
+    private var displaySizing = OrbitDisplaySizing()
     private var captureToken = 0
     private var capturePending = false
     private let inFlightFrames = DispatchSemaphore(value: 2)
@@ -158,6 +159,8 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
 
     func resetCamera() {
         camera.fit(frame.bodies)
+        displaySizing = OrbitDisplaySizing(bodies: frame.bodies, sceneScale: camera.scale)
+        geometryDirty = true
         hasFramed = !frame.bodies.isEmpty
         if followsSelection, let body = frame.bodies.first(where: { $0.id == selectedID }) {
             camera.target = body.position
@@ -184,9 +187,7 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
     }
 
     private func displayRadius(_ body: RenderBody) -> Double {
-        guard exaggeratedSizes else { return body.radius }
-        let nearest = frame.bodies.filter { $0.id != body.id }.map { simd_length($0.position-body.position) }.min() ?? camera.scale
-        return max(body.radius, min(nearest*0.20, camera.scale * (body.isStar ? 0.025 : 0.011)))
+        displaySizing.radius(for: body, enhanced: exaggeratedSizes)
     }
 
     private func projectedBodies(size: CGSize) -> [OrbitProjectedBody] {
@@ -271,7 +272,6 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
         }
         command.present(drawable)
         command.commit()
-        view?.updateLabels(projectedBodies(size: metalView.bounds.size))
     }
 
     private func makeBuffer<T>(_ data: [T]) -> MTLBuffer? {

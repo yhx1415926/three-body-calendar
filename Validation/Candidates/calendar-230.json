@@ -1,0 +1,23 @@
+{
+  "completedYears" : 342,
+  "elapsedSeconds" : 5.6876360177993774,
+  "engine" : "REBOUND 4.4.11 · IAS15 \/ PRS23",
+  "events" : [
+    "行星已确认远场逃逸：距最近恒星 127.4 AU（阈值 111.0 AU），相对全部恒星及恒星系质心持续外行，各自比能与总势能检验均具有至少 10% 余量，连续确认 5.00 标准年。停止后续历法；此判断基于牛顿模型与保守远场条件。"
+  ],
+  "habitableDurationYears" : 116.73189278914447,
+  "intervals" : 212,
+  "maximumAngularMomentumError" : 3.5058965067451962e-16,
+  "maximumEnergyError" : 2.4134309182775037e-14,
+  "maximumPlanetEccentricity" : 56.406347338138417,
+  "maximumPlanetSemimajorAxisAU" : 1804.6561466290202,
+  "minimumPlanetSemimajorAxisAU" : -320.72391968815214,
+  "normalizedAngularMomentumError" : 1.4644123634968832e-16,
+  "normalizedEnergyError" : 1.2657854466490405e-14,
+  "simulatedStandardYears" : 342.74609375000171,
+  "snapshots" : 142,
+  "stableYears" : 86,
+  "status" : "escaped",
+  "tolerance" : 1.0000000000000001e-09,
+  "years" : 10000
+}

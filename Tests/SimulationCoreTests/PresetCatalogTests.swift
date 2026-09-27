@@ -78,6 +78,8 @@ struct PresetCatalogTests {
     @Test("示例目录与旧的入口编号保持一致")
     func catalogIdentity() {
         #expect(Set(OrbitPreset.allCases.map(\.id)).count == 10)
+        #expect(OrbitPreset.catalog.filter { $0.category == .singleStar } == [.quietHierarchy])
+        #expect(OrbitPreset.catalog == [.quietHierarchy, .circumbinaryPlanet, .figureEight, .random])
         #expect(OrbitPreset(rawValue: 0) == .quietHierarchy)
         #expect(OrbitPreset(rawValue: 1) == .figureEight)
         #expect(OrbitPreset(rawValue: 2) == .random)

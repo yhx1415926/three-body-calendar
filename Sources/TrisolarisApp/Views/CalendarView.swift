@@ -6,6 +6,8 @@ struct CalendarView: View {
     @State private var query = ""
     @State private var filter = "all"
     @State private var displayMode = "epochs"
+    @State private var tablePage = 0
+    private let pageSize = 200
     @State private var selectedEpochID: Double?
     private var years: [CalendarYear] { store.result?.years ?? [] }
     private var filteredYears: [CalendarYear] {
@@ -68,7 +70,7 @@ struct CalendarView: View {
                     } label: { Label("导出", systemImage: "square.and.arrow.up") }
                 }.padding(.horizontal, 22).padding(.vertical, 12)
                 if displayMode == "epochs" {
-                    Table(epochRows, selection: $selectedEpochID) {
+                    Table(pageSlice(epochRows), selection: $selectedEpochID) {
                         TableColumn("纪元") { interval in
                             Label(interval.kind == .stable ? "恒纪元" : "乱纪元", systemImage: interval.kind == .stable ? "sun.max" : "wind")
                                 .foregroundStyle(interval.kind == .stable ? ObservatoryPalette.mint : ObservatoryPalette.coral)
@@ -88,7 +90,7 @@ struct CalendarView: View {
                             .font(.system(size: 10)).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(14)
                     }
                 } else {
-                    Table(filteredYears, selection: $store.selectedYear) {
+                    Table(pageSlice(filteredYears), selection: $store.selectedYear) {
                     TableColumn("年份") { row in Text(String(format: "%04d", row.year)).monospacedDigit() }.width(min: 65, ideal: 75)
                     TableColumn("纪元") { row in EpochBadge(year: row) }.width(min: 85, ideal: 100)
                     TableColumn("稳定占比") { row in
@@ -108,8 +110,32 @@ struct CalendarView: View {
                             .font(.system(size: 10)).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(14)
                     }
                 }
+                pagination
             }
+            .onChange(of: query) { tablePage = 0 }
+            .onChange(of: filter) { tablePage = 0 }
+            .onChange(of: displayMode) { tablePage = 0 }
+            .onChange(of: store.result?.scenario.id) { tablePage = 0 }
         }
+    }
+
+    private var rowCount: Int { displayMode == "epochs" ? epochRows.count : filteredYears.count }
+    private var pageCount: Int { max(1, (rowCount + pageSize - 1) / pageSize) }
+    private var currentPage: Int { min(tablePage, pageCount - 1) }
+    private func pageSlice<T>(_ rows: [T]) -> [T] {
+        let start = min(currentPage * pageSize, rows.count)
+        return Array(rows[start..<min(start + pageSize, rows.count)])
+    }
+    private var pagination: some View {
+        HStack {
+            Text("共 \(rowCount.formatted()) 条 · 每页最多 \(pageSize) 条").foregroundStyle(.secondary)
+            Spacer()
+            Button("首页") { tablePage = 0 }.disabled(currentPage == 0)
+            Button { tablePage = max(0, currentPage - 1) } label: { Image(systemName: "chevron.left") }.disabled(currentPage == 0).help("上一页")
+            Text("\(currentPage + 1) / \(pageCount)").monospacedDigit()
+            Button { tablePage = min(pageCount - 1, currentPage + 1) } label: { Image(systemName: "chevron.right") }.disabled(currentPage + 1 >= pageCount).help("下一页")
+            Button("末页") { tablePage = pageCount - 1 }.disabled(currentPage + 1 >= pageCount)
+        }.font(.system(size: 10)).padding(.horizontal, 18).padding(.vertical, 9).background(.bar)
     }
 
     private func yearRange(_ interval: EpochInterval) -> String {
@@ -159,6 +185,7 @@ struct CalendarView: View {
                         guard !years.isEmpty else { return }
                         let index = min(years.count - 1, max(0, Int(event.location.x / max(1, geometry.size.width) * Double(years.count))))
                         store.selectedYear = years[index].year
+                        if displayMode == "years" { tablePage = (filteredYears.firstIndex { $0.year == years[index].year } ?? 0) / pageSize }
                         selectedEpochID = store.result?.intervals.first { $0.startDays <= years[index].startDays && $0.endDays > years[index].startDays }?.id
                     })
             }.frame(height: 30)

@@ -1,0 +1,23 @@
+{
+  "completedYears" : 10000,
+  "elapsedSeconds" : 37.529291987419128,
+  "engine" : "REBOUND 4.4.11 · IAS15 \/ PRS23",
+  "events" : [
+
+  ],
+  "habitableDurationYears" : 172.40078495335254,
+  "intervals" : 52,
+  "maximumAngularMomentumError" : 1.5286240296678217e-12,
+  "maximumEnergyError" : 1.775548136196576e-12,
+  "maximumPlanetEccentricity" : 6333.4070955334209,
+  "maximumPlanetSemimajorAxisAU" : 59.309348228963302,
+  "minimumPlanetSemimajorAxisAU" : -70.214485201651144,
+  "normalizedAngularMomentumError" : 1.3304220568022904e-12,
+  "normalizedEnergyError" : 1.3832011636842899e-12,
+  "simulatedStandardYears" : 10000.099999999999,
+  "snapshots" : 4093,
+  "stableYears" : 165,
+  "status" : "completed",
+  "tolerance" : 1.0000000000000001e-09,
+  "years" : 10000
+}

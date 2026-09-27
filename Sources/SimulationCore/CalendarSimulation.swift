@@ -14,6 +14,8 @@ public final class CalendarSimulation {
     private var replay: [SimulationSnapshot] = []
     private var nextReplayDays: Double = 0
     private var replayStrideDays: Double
+    /// Optional validation observer, called only after accepting a climate sample.
+    public var onAcceptedSample: ((SimulationSnapshot) -> Void)?
 
     public init(scenario: Scenario) throws {
         self.scenario = scenario
@@ -197,9 +199,11 @@ public final class CalendarSimulation {
         }
         if midpoint.timeDays > first.timeDays {
             appendClimateSegment(from: first,to: midpoint); appendStatistics(from: first,to: midpoint)
+            onAcceptedSample?(midpoint)
         }
         if final.timeDays > midpoint.timeDays {
             appendClimateSegment(from: midpoint,to: final); appendStatistics(from: midpoint,to: final)
+            onAcceptedSample?(final)
         }
         climate = finalHistory; lastSnapshot = final
         return final.timeDays > midpoint.timeDays ? [midpoint.timeDays,final.timeDays] : [midpoint.timeDays]

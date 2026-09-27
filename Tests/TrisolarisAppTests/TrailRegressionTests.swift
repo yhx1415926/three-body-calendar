@@ -6,6 +6,17 @@ import SimulationCore
 @Suite("应用稳定性回归")
 @MainActor
 struct TrailRegressionTests {
+    @Test("参数修改即时标记未保存，与检查器是否显示无关")
+    func draftChangeTracking() {
+        let store = WorkspaceStore()
+        #expect(!store.hasUnsavedChanges)
+        store.draft.name = "已编辑"
+        #expect(store.hasUnsavedChanges)
+        store.hasUnsavedChanges = false
+        store.draft.name = "已编辑"
+        #expect(!store.hasUnsavedChanges)
+    }
+
     @Test("轨迹越过900点后持续更新不会触发独占访问崩溃")
     func trailCapacityRegression() throws {
         let store = WorkspaceStore()

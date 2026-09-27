@@ -28,6 +28,9 @@ export CLANG_MODULE_CACHE_PATH="$ROOT_DIR/.build/module-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$ROOT_DIR/.build/module-cache"
 export SWIFT_MODULECACHE_PATH="$ROOT_DIR/.build/module-cache"
 
+if [[ "$MODE" != "--build-only" ]]; then
+  /usr/bin/pkill -x "$PROCESS_NAME" >/dev/null 2>&1 || true
+fi
 BUILD_ARGS=(--build-system native --disable-sandbox --scratch-path "$ROOT_DIR/.build" --cache-path "$ROOT_DIR/.build/swiftpm-cache" -c "$BUILD_CONFIGURATION")
 /usr/bin/xcrun swift build "${BUILD_ARGS[@]}" --product "$PROCESS_NAME"
 BUILD_DIRECTORY="$(/usr/bin/xcrun swift build "${BUILD_ARGS[@]}" --show-bin-path)"
@@ -58,8 +61,8 @@ cat > "$APP_CONTENTS/Info.plist" <<PLIST
   <key>CFBundleName</key><string>$APP_NAME</string>
   <key>CFBundleDisplayName</key><string>$APP_NAME</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.1.0</string>
-  <key>CFBundleVersion</key><string>2</string>
+  <key>CFBundleShortVersionString</key><string>1.2.0</string>
+  <key>CFBundleVersion</key><string>3</string>
   <key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>

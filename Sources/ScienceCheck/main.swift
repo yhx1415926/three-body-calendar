@@ -5,6 +5,9 @@ import SimulationCore
 let args = CommandLine.arguments
 let years = args.count > 1 ? Int(args[1]) ?? 100 : 100
 var scenario = Presets.stableHierarchy()
+if let index = args.firstIndex(of: "--scenario"), args.count > index+1 {
+    scenario = try JSONDecoder().decode(Scenario.self, from: Data(contentsOf: URL(fileURLWithPath: args[index+1])))
+}
 if let index = args.firstIndex(of: "--seed"), args.count > index+1, let seed = UInt64(args[index+1]) {
     scenario = Presets.random(seed: seed, template: scenario, spatialScaleAU: 8, virialRatio: 0.4)
 }
@@ -40,6 +43,19 @@ do {
         exit(0)
     }
     let simulation = try CalendarSimulation(scenario: scenario)
+    var closeVisits: [UUID: Double] = [:]
+    var visitNames: [UUID: String] = [:]
+    if args.contains("--scenario") {
+        simulation.onAcceptedSample = { state in
+            guard let planet = state.bodies.first(where: { $0.kind == .planet }) else { return }
+            if let star = state.bodies.filter({ $0.kind == .star }).min(by: {
+                ($0.positionAU-planet.positionAU).squaredLength < ($1.positionAU-planet.positionAU).squaredLength
+            }), (star.positionAU-planet.positionAU).length < 2 * scenario.referenceDistanceAU, closeVisits[star.id] == nil {
+                closeVisits[star.id] = state.timeDays / scenario.standardYearDays
+                visitNames[star.id] = star.name
+            }
+        }
+    }
     var lastYear = -1
     var maximumEnergy = 0.0, maximumAngular = 0.0
     while simulation.progress.status == .ready || simulation.progress.status == .running {
@@ -62,8 +78,10 @@ do {
         return (a,e)
     }
     let report: [String: Any] = [
+        "closeVisits": closeVisits.map { ["star":visitNames[$0.key] ?? $0.key.uuidString, "year":$0.value] as [String:Any] },
         "years": years, "completedYears": result.progress.completedYears,
         "stableYears": stable, "status": result.progress.status.rawValue,
+        "habitableDurationYears": result.intervals.filter { $0.kind == .stable }.reduce(0) { $0+($1.endDays-$1.startDays)/result.standardYearDays },
         "elapsedSeconds": Date().timeIntervalSince(start),
         "normalizedEnergyError": result.finalSnapshot.diagnostics.normalizedEnergyError,
         "normalizedAngularMomentumError": result.finalSnapshot.diagnostics.normalizedAngularMomentumError,
@@ -88,7 +106,7 @@ do {
         exit(0)
     }
     if result.progress.status != .completed || result.progress.completedYears != years { exit(1) }
-    if maximumEnergy > 1e-9 || (orbitalElements.map(\.0).min() ?? 0) < 0.95 || (orbitalElements.map(\.0).max() ?? 2) > 1.05 || (orbitalElements.map(\.1).max() ?? 1) >= 0.1 { exit(2) }
+    if !args.contains("--scenario"), maximumEnergy > 1e-9 || (orbitalElements.map(\.0).min() ?? 0) < 0.95 || (orbitalElements.map(\.0).max() ?? 2) > 1.05 || (orbitalElements.map(\.1).max() ?? 1) >= 0.1 { exit(2) }
 } catch {
     print("Validation failed: \(error.localizedDescription)")
     exit(1)

@@ -2,13 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="1.1.0"
+VERSION="1.2.0"
 APP_NAME="三体人的万年历"
 APP_BUNDLE="$ROOT_DIR/dist/$APP_NAME.app"
-DMG_NAME="TrisolarisCalendar-v$VERSION-macos-arm64.dmg"
-SOURCE_ROOT_NAME="TrisolarisCalendar-v$VERSION-source"
-SOURCE_NAME="$SOURCE_ROOT_NAME.zip"
-CHECKSUM_NAME="TrisolarisCalendar-v$VERSION-SHA256SUMS.txt"
+DMG_NAME="ThreeBodyCalendar-v$VERSION-arm64.dmg"
 
 cd "$ROOT_DIR"
 /bin/mkdir -p "$ROOT_DIR/.build/module-cache" "$ROOT_DIR/.build/swiftpm-cache"
@@ -19,7 +16,7 @@ BUILD_ARGS=(--build-system native --disable-sandbox --scratch-path "$ROOT_DIR/.b
 /usr/bin/xcrun swift test "${BUILD_ARGS[@]}"
 /usr/bin/xcrun swift run "${BUILD_ARGS[@]}" -c release ScienceCheck 100
 
-# Keep build_and_run.sh's default debug workflow intact.
+# Build the distributable app in Release mode.
 TRISOLARIS_BUILD_CONFIGURATION=release "$ROOT_DIR/script/build_and_run.sh" --build-only
 
 actual_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_BUNDLE/Contents/Info.plist")"
@@ -62,28 +59,12 @@ mounted=false
 /usr/bin/hdiutil convert "$work_dir/layout.dmg" -format UDZO -o "$work_dir/$DMG_NAME" >/dev/null
 /usr/bin/hdiutil verify "$work_dir/$DMG_NAME" >/dev/null
 
-source_root="$work_dir/$SOURCE_ROOT_NAME"
-/bin/mkdir -p "$source_root"
-for entry in Package.swift README.md LICENSE THIRD_PARTY_NOTICES.md .gitignore Resources Sources Tests Vendor script Examples Validation; do
-  /usr/bin/rsync -a --exclude '.DS_Store' "$ROOT_DIR/$entry" "$source_root/"
-done
-/usr/bin/ditto --norsrc -c -k --keepParent "$source_root" "$work_dir/$SOURCE_NAME"
-/usr/bin/unzip -tq "$work_dir/$SOURCE_NAME" >/dev/null
-if /usr/bin/unzip -Z1 "$work_dir/$SOURCE_NAME" | /usr/bin/grep -Eq '(^|/)(\._[^/]*|__MACOSX|\.DS_Store|\.build|\.swiftpm|dist|\.git)(/|$)'; then
-  echo "源码压缩包包含本地构建文件或 macOS 元数据。" >&2
-  exit 1
-fi
-
 /bin/mv -f "$work_dir/$DMG_NAME" "$ROOT_DIR/dist/$DMG_NAME"
-/bin/mv -f "$work_dir/$SOURCE_NAME" "$ROOT_DIR/dist/$SOURCE_NAME"
-(
-  cd "$ROOT_DIR/dist"
-  /usr/bin/shasum -a 256 "$DMG_NAME" "$SOURCE_NAME" > "$CHECKSUM_NAME"
-)
-/bin/rm -f "$ROOT_DIR/dist/TrisolarisCalendar-v$VERSION-macos-arm64.zip" \
+/bin/rm -f "$ROOT_DIR/dist/TrisolarisCalendar-v$VERSION-macos-arm64.dmg" \
+  "$ROOT_DIR/dist/TrisolarisCalendar-v$VERSION-source.zip" \
+  "$ROOT_DIR/dist/TrisolarisCalendar-v$VERSION-SHA256SUMS.txt" \
+  "$ROOT_DIR/dist/TrisolarisCalendar-v$VERSION-macos-arm64.zip" \
   "$ROOT_DIR/dist/TrisolarisCalendar-v$VERSION-macos-arm64.zip.sha256"
 
 echo "App 附件: $ROOT_DIR/dist/$DMG_NAME"
-echo "源码附件: $ROOT_DIR/dist/$SOURCE_NAME"
-echo "SHA-256: $ROOT_DIR/dist/$CHECKSUM_NAME"
 echo "此 App 与 DMG 尚未经过 Developer ID 签名或 Apple 公证。"
