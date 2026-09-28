@@ -50,6 +50,8 @@ struct WorkspaceView: View {
         .background(WindowLifecycle(store: store))
         .task { await store.bootstrap() }
         .onOpenURL { store.openProject(at: $0) }
+        .sheet(isPresented: $store.showRandomSystemSheet) { RandomSystemView(store: store) }
+        .sheet(isPresented: $store.showObservedSystemSheet) { ObservedSystemView(store: store) }
         .onDisappear { store.shutdown() }
     }
 
@@ -59,6 +61,9 @@ struct WorkspaceView: View {
                 Eyebrow(text: store.page.english)
                 Text(store.page == .observatory ? "在混沌中，寻找秩序。" : store.page == .calendar ? "时间的另一种刻度。" : "让每一个结论，都有依据。")
                     .font(.system(size: 22, weight: .medium))
+                if let planet = (store.page == .observatory ? store.displayedScenario : store.result?.scenario ?? store.draft).planet {
+                    Text("历法与环境对象：\(planet.name)").font(.system(size: 10)).foregroundStyle(.secondary)
+                }
             }
             Spacer()
             if store.isDraftChanged {
@@ -85,8 +90,12 @@ struct WorkspaceView: View {
                         }
                     }
                 }
+                Divider()
+                Button("自定义数量随机生成…") { store.showRandomSystemSheet = true }
             } label: { Label("初始轨道", systemImage: "square.stack.3d.up") }
             .disabled(store.isComputing)
+            Button { store.showObservedSystemSheet = true } label: { Label("真实星系", systemImage: "globe.europe.africa") }
+                .disabled(!store.canEditBodies)
             Button { store.openProject() } label: { Label("打开", systemImage: "folder") }
             Button { Task { await store.saveProject() } } label: { Label("保存", systemImage: "square.and.arrow.down") }
                 .disabled(store.isSaving)
@@ -151,7 +160,7 @@ private struct SidebarView: View {
                             store.page = .observatory
                         } label: {
                             HStack(spacing: 10) {
-                                Circle().fill(ObservatoryPalette.bodyColors[index % 4]).frame(width: 9, height: 9)
+                                Circle().fill(ObservatoryPalette.bodyColor(index)).frame(width: 9, height: 9)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(body.name).foregroundStyle(.primary).lineLimit(1)
                                     Text(body.kind == .star ? "\(body.massSolar.display(2)) M☉" : "\((body.massSolar / Astronomy.earthMassSolar).display(2)) M⊕")
@@ -162,9 +171,17 @@ private struct SidebarView: View {
                             }.contentShape(Rectangle())
                         }.buttonStyle(.plain).padding(.vertical, 3)
                     }
-                    Button { store.addOrRemovePlanet() } label: {
-                        Label(store.draft.planet == nil ? "添加行星" : "移除行星", systemImage: store.draft.planet == nil ? "plus.circle" : "minus.circle")
-                    }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary).disabled(store.isComputing)
+                    HStack {
+                        Menu {
+                            Button("添加恒星") { store.addBody(.star) }
+                            Button("添加行星") { store.addBody(.planet) }
+                        } label: { Label("添加天体", systemImage: "plus.circle") }
+                        .disabled(!store.canEditBodies || store.draft.bodies.count >= Scenario.maximumBodyCount)
+                        Spacer()
+                        Button { store.removeSelectedBody() } label: { Image(systemName: "minus.circle") }
+                            .help("移除所选天体；至少保留一颗恒星")
+                            .disabled(!store.canEditBodies || !store.canRemoveSelectedBody)
+                    }.buttonStyle(.borderless).font(.system(size: 11))
                 }
             }.listStyle(.sidebar)
             VStack(alignment: .leading, spacing: 9) {

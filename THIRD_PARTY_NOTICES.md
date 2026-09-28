@@ -31,3 +31,16 @@ Copyright © 2026 三体人的万年历 contributors.
 应用原创源码和资源采用 GPL-3.0-or-later。您可以依许可运行、修改及再分发；
 软件按原样提供，不含适销性或特定用途适用性保证。分发构建产物时，应同时提供
 相应源码及许可文件。Apple 系统框架由操作系统提供，不包含在本源码分发中。
+
+
+## 半人马座 α 公开观测资料
+
+本应用离线收录 CDS/VizieR 的公开数值表，原始列说明、作者引文与来源记录保存在
+`Sources/SimulationCore/Resources/ObservedSystems/`，并随应用资源包分发。
+
+- Akeson et al. (2021), AJ 162, 14，表 6、7，CDS J/AJ/162/14；https://doi.org/10.3847/1538-3881/abfaff
+- Suárez Mascareño et al. (2020), A&A 639, A77，表 A.1，CDS J/A+A/639/A77；https://doi.org/10.1051/0004-6361/202037745
+- 模型根数、状态及辐射参数采用 Kervella et al. (2016/2017) 和 Ribas et al. (2016)，完整引文及具体表号见 `alpha-centauri-provenance.md`。
+
+资料及原文说明归原作者和 CDS；应用代码的 GPL 声明不改写第三方资料的归属。
+使用这些数值开展研究应引用原论文和 CDS/VizieR。原数值表未替换为推算或插值。

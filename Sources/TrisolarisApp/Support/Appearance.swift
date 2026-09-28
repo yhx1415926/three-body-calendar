@@ -6,6 +6,26 @@ enum ObservatoryPalette {
     static let blue = Color(red: 0.47, green: 0.64, blue: 1.0)
     static let coral = Color(red: 0.96, green: 0.48, blue: 0.41)
     static let bodyColors: [Color] = [amber, blue, coral, mint]
+    static func bodyColor(_ index: Int) -> Color {
+        let rgb = bodyRGB(index)
+        return Color(red: Double(rgb.x), green: Double(rgb.y), blue: Double(rgb.z))
+    }
+    static func bodyRGB(_ index: Int) -> SIMD3<Float> {
+        if index < rgb.count { return rgb[max(0,index)] }
+        let hue = Double(index - 4) * 0.618033988749895
+        let h = (hue - floor(hue)) * 6
+        let c = 0.72, x = c * (1 - abs(h.truncatingRemainder(dividingBy: 2) - 1)), m = 0.23
+        let components: (Double,Double,Double)
+        switch Int(h) {
+        case 0: components = (c,x,0)
+        case 1: components = (x,c,0)
+        case 2: components = (0,c,x)
+        case 3: components = (0,x,c)
+        case 4: components = (x,0,c)
+        default: components = (c,0,x)
+        }
+        return SIMD3(Float(components.0+m),Float(components.1+m),Float(components.2+m))
+    }
     static let rgb: [SIMD3<Float>] = [SIMD3(1, 0.69, 0.30), SIMD3(0.48, 0.65, 1), SIMD3(1, 0.40, 0.31), SIMD3(0.33, 0.91, 0.75)]
 }
 

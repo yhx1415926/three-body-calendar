@@ -80,7 +80,7 @@ public final class NBodySimulation {
     public var timeDays: Double { handle.pointee.t }
     public var snapshot: SimulationSnapshot {
         let bodies = currentBodies()
-        return SimulationSnapshot(timeDays: timeDays, bodies: bodies, fluxEarth: Self.flux(for: bodies), temperatureC: nil,
+        return SimulationSnapshot(timeDays: timeDays, bodies: bodies, fluxEarth: Self.flux(for: bodies, planetID: scenario.calendarPlanetID), temperatureC: nil,
                                   fluxCoefficientOfVariation: nil, diagnostics: baseline.diagnostics(bodies: bodies))
     }
     /// Live orbit snapshots deliberately leave temperature nil. Only the climate engine evolves thermal inertia.
@@ -140,8 +140,8 @@ public final class NBodySimulation {
         } }
         return max(step, max(abs(timeDays)*Double.ulpOfOne*16, 1e-10))
     }
-    public static func flux(for bodies: [CelestialBody]) -> Double? {
-        guard let planet = bodies.first(where: { $0.kind == .planet }) else { return nil }
+    public static func flux(for bodies: [CelestialBody], planetID: UUID? = nil) -> Double? {
+        guard let planet = bodies.first(where: { $0.kind == .planet && (planetID == nil || $0.id == planetID) }) else { return nil }
         return bodies.filter { $0.kind == .star }.reduce(0) { total, star in
             total + star.luminositySolar/max((star.positionAU-planet.positionAU).squaredLength, 1e-30)
         }

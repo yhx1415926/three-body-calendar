@@ -11,7 +11,9 @@ struct ObservatoryView: View {
             OrbitSceneView(frame: store.frame, trails: store.trails, selectedID: $store.selectedBodyID,
                            followSelected: store.followSelected, topDown: store.topDown, showGrid: showGrid,
                            exaggeratedSizes: exaggeratedSizes, resetToken: store.resetToken,
-                           captureToken: store.captureToken, onCapture: store.receiveScenePNG)
+                           captureToken: store.captureToken, onCapture: store.receiveScenePNG,
+                           interactionMode: store.interactionMode,
+                           onMoveBody: store.isComputing ? nil : { id, position, phase in store.moveBody(id, to: position, phase: phase) })
                 .frame(minHeight: 280)
             sceneCaption
             playbackControls
@@ -33,16 +35,24 @@ struct ObservatoryView: View {
 
     private var sceneLegend: some View {
         HStack(spacing: 14) {
+            ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 14) {
             ForEach(Array(store.frame.bodies.enumerated()), id: \.element.id) { index, body in
                 Button { store.selectedBodyID = body.id } label: {
                     HStack(spacing: 5) {
-                        Circle().fill(ObservatoryPalette.bodyColors[index % 4]).frame(width: 7, height: 7)
+                        Circle().fill(ObservatoryPalette.bodyColor(index)).frame(width: 7, height: 7)
                         Text(body.name).font(.system(size: 10))
                         if store.selectedBodyID == body.id { Image(systemName: "checkmark").font(.system(size: 9)) }
                     }
                 }.buttonStyle(.plain)
             }
-            Spacer(minLength: 4)
+            } }.frame(maxWidth: .infinity, alignment: .leading)
+            Picker("鼠标模式", selection: Binding(get: { store.interactionMode }, set: { store.setInteractionMode($0) })) {
+                ForEach(OrbitInteractionMode.allCases) { mode in
+                    Image(systemName: mode.symbolName).tag(mode).help(mode.help)
+                }
+            }.labelsHidden().pickerStyle(.segmented).frame(width: 66).disabled(store.isComputing)
+            Button { store.undoPositionEdit() } label: { Image(systemName: "arrow.uturn.backward") }
+                .help("撤销最近的位置编辑").disabled(store.positionUndo == nil || !store.canEditBodies)
             Button { store.resetToken += 1 } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.help("重置视角 ⌘0")
             Toggle("俯视", isOn: $store.topDown).toggleStyle(.checkbox)
             Toggle("跟随所选天体", isOn: $store.followSelected).toggleStyle(.checkbox)
@@ -52,7 +62,7 @@ struct ObservatoryView: View {
 
     private var sceneCaption: some View {
         HStack {
-            Text("拖动旋转 · 滚动缩放 · ⇧ 拖动平移 · 点击选择")
+            Text(store.interactionMode == .moveBodies ? "箭头：拖动天体改位置 · Esc 撤销 · 保持屏幕深度" : "手型：拖动旋转 · 滚动缩放 · ⇧ 拖动平移")
             Spacer()
             Text(exaggeratedSizes ? "增强显示 · 天体半径固定" : "真实天体半径")
         }.font(.system(size: 9)).foregroundStyle(.secondary).padding(.horizontal, 18).padding(.vertical, 7).background(.bar)

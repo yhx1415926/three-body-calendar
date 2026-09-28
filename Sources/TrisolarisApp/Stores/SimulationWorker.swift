@@ -117,4 +117,5 @@ struct ProjectArchive: Codable, Sendable {
     var result: CalendarResult?
     var previousResult: CalendarResult?
     var checkpoint: Data?
+    var importedObservations: [StellarObservation]? = nil
 }

@@ -19,7 +19,7 @@ struct AnalysisView: View {
                         Text("阴影表示每年的温度范围；曲线为范围中点。长历法按年份抽样显示，完整数值可导出。")
                             .font(.system(size: 10)).foregroundStyle(.secondary)
                     }
-                    Panel(title: "三个太阳的总辐照", subtitle: "YEAR / F⊕") { fluxChart }
+                    Panel(title: "所有恒星的总辐照", subtitle: "YEAR / F⊕") { fluxChart }
                 }
                 Panel(title: "精度复核", subtitle: "NUMERICAL VERIFICATION") {
                     Text(store.verificationSummary ?? "当前结果尚未与更严格设置独立复算比较。守恒诊断可以揭示数值问题，但不能保证混沌轨迹的长期唯一性。")
@@ -46,9 +46,9 @@ struct AnalysisView: View {
                 }
                 Panel(title: "模型与判定依据", subtitle: "MODEL NOTES") {
                     VStack(alignment: .leading, spacing: 12) {
-                        modelLine("引力", "三个恒星与有质量行星相互作用；双精度牛顿引力，有限半径碰撞终止。")
+                        modelLine("引力", "所有恒星与有质量行星相互作用；双精度牛顿引力，有限半径碰撞终止。")
                         modelLine("标准年", "T = 2π√[a³ / G(M★ + Mₚ)]。参考恒星与距离在本次运行中固定。")
-                        modelLine("气候", "合并三颗恒星的辐照，以反照率、温室增温和热响应时间计算全球平均模型温度。")
+                        modelLine("气候", "合并所有恒星的辐照，为指定历法行星计算全球平均模型温度，考虑反照率、温室增温和热响应时间。")
                         modelLine("纪元", "满足温度、总辐照、波动及最短持续时间的区间为恒纪元；全年覆盖才标为恒纪元年。")
                         modelLine("边界", "未包含完整大气、昼夜和季节、遮掩、恒星演化及相对论效应。宜居阈值为可调整的作品规则。")
                         modelLine("复现", "随机种子、完整初值、计算设置、规则与内核版本随项目保存。跨版本或架构不承诺逐位相同。")

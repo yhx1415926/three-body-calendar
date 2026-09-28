@@ -25,6 +25,11 @@ struct InspectorView: View {
                         TextField("年数", value: $store.draft.durationYears, format: .number.grouping(.never))
                             .textFieldStyle(.roundedBorder).frame(width: 104).multilineTextAlignment(.trailing)
                     }
+                    if !store.draft.bodies.filter({ $0.kind == .planet }).isEmpty {
+                        Picker("历法行星", selection: Binding(get: { store.draft.planet?.id }, set: { store.draft.calendarPlanetID = $0 })) {
+                            ForEach(store.draft.bodies.filter { $0.kind == .planet }) { Text($0.name).tag(Optional($0.id)) }
+                        }.font(.system(size: 11))
+                    }
                     Picker("参考恒星", selection: $store.draft.referenceStarID) {
                         ForEach(store.draft.bodies.filter { $0.kind == .star }) { Text($0.name).tag($0.id) }
                     }.font(.system(size: 11))
@@ -77,12 +82,14 @@ struct InspectorView: View {
                         }
                         NumberControl(title: "随机空间尺度", value: $store.randomSpatialScaleAU, unit: "AU")
                         NumberControl(title: "动能 / |势能|", value: $store.randomVirialRatio)
-                        Button("使用此种子生成随机轨道") {
+                        Button("经典三体随机生成") {
                             if let seed = UInt64(seedText), store.randomSpatialScaleAU.isFinite, store.randomSpatialScaleAU > 0,
                                store.randomVirialRatio.isFinite, store.randomVirialRatio > 0 { store.choosePreset(2, seed: seed) }
                             else { store.errorMessage = "随机种子必须是非负整数。" }
                         }.font(.system(size: 11))
-                        Text("保留当前天体的质量、半径与光度，仅重新生成初始轨道。").font(.system(size: 10)).foregroundStyle(.secondary)
+                        Button("自定义恒星与行星数量…") { store.showRandomSystemSheet = true }
+                            .font(.system(size: 11))
+                        Text("经典生成保留三体算法；多天体系统使用自定义数量入口。").font(.system(size: 10)).foregroundStyle(.secondary)
                     }.padding(.top, 12)
                 } label: { Label("数值与随机设置", systemImage: "slider.horizontal.3").font(.system(size: 12, weight: .medium)) }
                 if !store.draft.notes.isEmpty {
@@ -109,7 +116,7 @@ struct InspectorView: View {
         let body = store.draft.bodies[index]
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Circle().fill(ObservatoryPalette.bodyColors[index % 4]).frame(width: 8, height: 8)
+                Circle().fill(ObservatoryPalette.bodyColor(index)).frame(width: 8, height: 8)
                 Text(body.kind == .star ? "恒星参数" : "行星参数").font(.system(size: 14, weight: .semibold))
                 Spacer()
             }
@@ -133,10 +140,17 @@ struct InspectorView: View {
     }
 
     private func bodyBinding<T>(_ index: Int, _ keyPath: WritableKeyPath<CelestialBody, T>) -> Binding<T> {
-        Binding(get: { store.draft.bodies[index][keyPath: keyPath] }, set: { store.draft.bodies[index][keyPath: keyPath] = $0 })
+        let body = store.draft.bodies[index]
+        return Binding(get: {
+            (store.draft.bodies.first { $0.id == body.id } ?? body)[keyPath: keyPath]
+        }, set: { value in
+            guard let current = store.draft.bodies.firstIndex(where: { $0.id == body.id }) else { return }
+            store.draft.bodies[current][keyPath: keyPath] = value
+        })
     }
     private func scaledBodyBinding(_ index: Int, _ keyPath: WritableKeyPath<CelestialBody, Double>, scale: Double) -> Binding<Double> {
-        Binding(get: { store.draft.bodies[index][keyPath: keyPath] / scale }, set: { store.draft.bodies[index][keyPath: keyPath] = $0 * scale })
+        let binding = bodyBinding(index, keyPath)
+        return Binding(get: { binding.wrappedValue / scale }, set: { binding.wrappedValue = $0 * scale })
     }
 }
 

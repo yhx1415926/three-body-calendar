@@ -17,6 +17,17 @@ final class WorkspaceStore {
     var previousResult: CalendarResult?
     var progress: SimulationProgress?
     var trails: [String: [SIMD3<Double>]] = [:]
+    var interactionMode: OrbitInteractionMode = .navigate
+    var showRandomSystemSheet = false
+    var showObservedSystemSheet = false
+    var importedObservations: [StellarObservation] = []
+    var isPositionPreview = false
+    @ObservationIgnored var positionEditBackup: Scenario?
+    @ObservationIgnored var positionEditInitial: Scenario?
+    @ObservationIgnored var positionEditWasDirty = false
+    @ObservationIgnored var positionEditPreviousPreview = false
+    @ObservationIgnored var positionEditTrails: [String: [SIMD3<Double>]] = [:]
+    var positionUndo: Scenario?
     var isPlaying = false
     var isComputing = false
     var canResume = false
@@ -64,11 +75,11 @@ final class WorkspaceStore {
     var validationMessages: [String] { draft.validationIssues().map(\.message) }
     var selectedBodyIndex: Int? { draft.bodies.firstIndex { $0.id.uuidString == selectedBodyID } }
     var frame: OrbitSceneFrame {
-        let bodies = snapshot?.bodies ?? activeScenario.bodies
+        let bodies = usesDraftPositions ? draft.bodies : (snapshot?.bodies ?? activeScenario.bodies)
         return OrbitSceneFrame(time: snapshot?.timeDays ?? 0, bodies: bodies.enumerated().map { index, body in
             RenderBody(id: body.id.uuidString, name: body.name,
                        position: SIMD3(body.positionAU.x, body.positionAU.y, body.positionAU.z),
-                       radius: body.radiusAU, color: ObservatoryPalette.rgb[index % 4], isStar: body.kind == .star)
+                       radius: body.radiusAU, color: ObservatoryPalette.bodyRGB(index), isStar: body.kind == .star)
         })
     }
     var stableYears: Int { result?.years.filter { $0.isComplete && $0.kind == .stable }.count ?? 0 }
@@ -99,36 +110,43 @@ final class WorkspaceStore {
     func edited() { hasUnsavedChanges = true; changeRevision &+= 1 }
 
     func choosePreset(_ index: Int, seed: UInt64 = UInt64.random(in: 1...UInt64.max)) {
-        guard !isLoading, let preset = OrbitPreset(rawValue: index) else { return }
+        guard canEditBodies, let preset = OrbitPreset(rawValue: index) else { return }
         stopAll()
+        clearPositionEditing()
         if let result { previousResult = result }
         result = nil; progress = nil; canResume = false; verificationSummary = nil
         draft = preset == .random
-            ? Presets.random(seed: seed, template: draft, spatialScaleAU: randomSpatialScaleAU, virialRatio: randomVirialRatio)
+            ? Presets.random(seed: seed, template: classicRandomTemplate, spatialScaleAU: randomSpatialScaleAU, virialRatio: randomVirialRatio)
             : Presets.scenario(for: preset)
         selectedBodyID = draft.bodies.first?.id.uuidString
         Task { await resetSimulation() }
     }
 
-    func resetSimulation(markDirty: Bool = true) async {
+    func resetSimulation(markDirty: Bool = true, preserveCamera: Bool = false) async {
+        guard positionEditBackup == nil else { return }
         guard !isLoading else { return }
         guard !isComputing else { notice = "请先暂停历法计算，再应用新的初始条件"; return }
         guard validationMessages.isEmpty else { errorMessage = validationMessages.joined(separator: "\n"); return }
         stopPlayback()
         isReplay = false
         let token = UUID(); sessionToken = token
+        let configuration = draft
         do {
-            let fresh = try await worker.prepareLive(draft)
-            guard sessionToken == token else { return }
-            activeScenario = draft; snapshot = fresh; trails = [:]; appendTrail(fresh)
-            resetToken += 1; notice = "初始条件已应用"
+            let fresh = try await worker.prepareLive(configuration)
+            guard sessionToken == token, draft == configuration else { return }
+            activeScenario = configuration; snapshot = fresh; trails = [:]; appendTrail(fresh)
+            isPositionPreview = false
+            if !preserveCamera { resetToken += 1 }
+            notice = "初始条件已应用"
             if markDirty { hasUnsavedChanges = true }
         } catch { errorMessage = error.localizedDescription }
     }
 
     func togglePlayback() {
+        guard positionEditBackup == nil else { return }
         guard !isLoading else { return }
         if isPlaying { stopPlayback(); return }
+        interactionMode = .navigate
         if isComputing { notice = "历法正在计算，可在完成后回放"; return }
         Task {
             if isReplay, let result {
@@ -137,7 +155,7 @@ final class WorkspaceStore {
                     activeScenario = result.scenario; isReplay = false
                 } catch { errorMessage = error.localizedDescription; return }
             } else if isDraftChanged || snapshot == nil { await resetSimulation() }
-            guard validationMessages.isEmpty else { return }
+            guard validationMessages.isEmpty, draft == activeScenario, !isPositionPreview, interactionMode == .navigate else { return }
             beginPlayback()
         }
     }
@@ -175,13 +193,18 @@ final class WorkspaceStore {
     }
 
     func step() {
+        guard positionEditBackup == nil else { return }
         guard !isLoading else { return }
         stopPlayback()
         guard !isComputing else { return }
         Task {
             do {
                 if isDraftChanged || isReplay { await resetSimulation() }
-                if let frame = try await worker.advanceLive(years: 1.0 / 128) { snapshot = frame; appendTrail(frame) }
+                guard draft == activeScenario, positionEditBackup == nil else { return }
+                let token = sessionToken
+                if let frame = try await worker.advanceLive(years: 1.0 / 128), sessionToken == token, positionEditBackup == nil {
+                    snapshot = frame; appendTrail(frame)
+                }
             } catch { errorMessage = error.localizedDescription }
         }
     }
@@ -199,6 +222,7 @@ final class WorkspaceStore {
     }
 
     func startCalendar(strict: Bool = false) {
+        guard positionEditBackup == nil else { return }
         guard !isLoading else { return }
         guard !isComputing else { return }
         guard validationMessages.isEmpty else { errorMessage = validationMessages.joined(separator: "\n"); return }
@@ -238,7 +262,7 @@ final class WorkspaceStore {
     }
 
     func resumeCalendar() {
-        guard !isLoading, canResume, !isComputing else { return }
+        guard positionEditBackup == nil, !isLoading, canResume, !isComputing else { return }
         stopPlayback(); isComputing = true; canResume = false; notice = "继续计算万年历"
         if let result { activeScenario = result.scenario }
         isReplay = false
@@ -370,21 +394,9 @@ final class WorkspaceStore {
         isVerification = false; comparisonResult = nil
     }
 
-    func addOrRemovePlanet() {
-        guard !isLoading, !isComputing else { return }
-        if let planet = draft.planet { draft.bodies.removeAll { $0.id == planet.id } }
-        else if let star = draft.referenceStar {
-            let radius = draft.referenceDistanceAU
-            let speed = sqrt(Astronomy.gravitationalConstant * (star.massSolar + Astronomy.earthMassSolar) / radius)
-            let body = CelestialBody(name: "行星 · 文明之舟", kind: .planet, massSolar: Astronomy.earthMassSolar, radiusAU: Astronomy.earthRadiusAU,
-                                     positionAU: star.positionAU + Vector3(radius, 0, 0), velocityAUPerDay: star.velocityAUPerDay + Vector3(0, speed, 0))
-            draft.bodies.append(body); selectedBodyID = body.id.uuidString
-        }
-        edited()
-    }
-
     func restorePreviousResult() {
-        guard let previousResult, !isComputing else { return }
+        guard let previousResult, !isLoading, !isComputing else { return }
+        stopAll(); clearPositionEditing()
         let current = result; result = previousResult; self.previousResult = current
         activeScenario = previousResult.scenario; draft = previousResult.scenario
         snapshot = previousResult.finalSnapshot; progress = previousResult.progress
@@ -406,6 +418,7 @@ final class WorkspaceStore {
     }
 
     func openProject(at url: URL) {
+        guard positionEditBackup == nil else { return }
         guard !isLoading else { return }
         Task {
             if hasUnsavedChanges {
@@ -421,7 +434,7 @@ final class WorkspaceStore {
     }
 
     @discardableResult func saveProject(saveAs: Bool = false) async -> Bool {
-        guard !isLoading, !isSaving else { return false }
+        guard positionEditBackup == nil, !isLoading, !isSaving else { return false }
         var destination = projectURL
         if saveAs || destination == nil {
             let panel = NSSavePanel(); panel.allowedContentTypes = [UTType(filenameExtension: "trisolaris") ?? .json]
@@ -448,11 +461,12 @@ final class WorkspaceStore {
     private func makeArchive() async throws -> ProjectArchive {
         let token = sessionToken
         let savedDraft = draft, savedActive = activeScenario, savedResult = result, savedPrevious = previousResult
+        let savedObservations = importedObservations
         let (checkpoint, latestResult) = try await worker.exportState()
         guard sessionToken == token else { throw SimulationError.invalidCheckpoint("保存期间项目发生切换，请在当前项目中重新保存。") }
         let matching = latestResult != nil && (latestResult?.scenario == savedResult?.scenario || (savedResult == nil && latestResult?.scenario == savedActive))
         return ProjectArchive(draft: savedDraft, activeScenario: savedActive, result: matching ? (latestResult ?? savedResult) : savedResult,
-                              previousResult: savedPrevious, checkpoint: matching ? checkpoint : nil)
+                              previousResult: savedPrevious, checkpoint: matching ? checkpoint : nil, importedObservations: savedObservations.isEmpty ? nil : savedObservations)
     }
 
     private func load(_ url: URL, recovery: Bool = false) async throws {
@@ -483,6 +497,7 @@ final class WorkspaceStore {
         }
         guard token == sessionToken, !Task.isCancelled else { throw CancellationError() }
         draft = archive.draft; activeScenario = archive.activeScenario; result = archive.result; previousResult = archive.previousResult
+        importedObservations = archive.importedObservations ?? []
         if let update = restoredUpdate {
             accept(update); canResume = update.progress.status == .running || update.progress.status == .ready
             if let savedResult = update.result { activeScenario = savedResult.scenario }
@@ -491,6 +506,7 @@ final class WorkspaceStore {
             else { snapshot = restoredLive }
             progress = archive.result?.progress; canResume = false
         }
+        clearPositionEditing()
         selectedBodyID = draft.bodies.first?.id.uuidString
         projectURL = recovery ? nil : url; trails = [:]; resetToken += 1
         isReplay = result != nil; hasUnsavedChanges = recovery

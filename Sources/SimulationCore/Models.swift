@@ -75,10 +75,13 @@ public struct NumericalSettings: Codable, Sendable, Hashable {
 }
 
 public struct Scenario: Codable, Sendable, Hashable, Identifiable {
+    public static let maximumBodyCount = 64
     public var id: UUID
     public var name: String
     public var bodies: [CelestialBody]
     public var referenceStarID: UUID
+    /// nil keeps older projects' convention of using the first planet for the calendar.
+    public var calendarPlanetID: UUID?
     public var referenceDistanceAU: Double
     public var durationYears: Int
     public var climateRules: ClimateRules
@@ -88,12 +91,15 @@ public struct Scenario: Codable, Sendable, Hashable, Identifiable {
     public init(id: UUID = UUID(), name: String, bodies: [CelestialBody], referenceStarID: UUID,
                 referenceDistanceAU: Double = 1, durationYears: Int = 10_000,
                 climateRules: ClimateRules = ClimateRules(), numerics: NumericalSettings = NumericalSettings(),
-                randomSeed: UInt64? = nil, notes: String = "") {
+                randomSeed: UInt64? = nil, notes: String = "", calendarPlanetID: UUID? = nil) {
         self.id = id; self.name = name; self.bodies = bodies; self.referenceStarID = referenceStarID
+        self.calendarPlanetID = calendarPlanetID
         self.referenceDistanceAU = referenceDistanceAU; self.durationYears = durationYears
         self.climateRules = climateRules; self.numerics = numerics; self.randomSeed = randomSeed; self.notes = notes
     }
-    public var planet: CelestialBody? { bodies.first { $0.kind == .planet } }
+    public var planet: CelestialBody? {
+        bodies.first { $0.kind == .planet && (calendarPlanetID == nil || $0.id == calendarPlanetID) }
+    }
     public var referenceStar: CelestialBody? { bodies.first { $0.id == referenceStarID && $0.kind == .star } }
     /// Recomputed only when configuring a new run. Running engines freeze this duration.
     public var standardYearDays: Double {
@@ -101,12 +107,16 @@ public struct Scenario: Codable, Sendable, Hashable, Identifiable {
         return 2 * .pi * sqrt(pow(referenceDistanceAU, 3) / (Astronomy.gravitationalConstant * (star.massSolar + (planet?.massSolar ?? 0))))
     }
     public func validationIssues() -> [ValidationIssue] {
+        // Reject oversized imports before the pairwise overlap checks below.
+        guard bodies.count <= Self.maximumBodyCount else {
+            return [ValidationIssue("最多添加 \(Self.maximumBodyCount) 颗天体。")]
+        }
         var issues: [ValidationIssue] = []
         func reject(_ condition: Bool, _ message: String) { if condition { issues.append(ValidationIssue(message)) } }
-        reject(bodies.filter { $0.kind == .star }.count != 3, "必须恰好包含三颗恒星。")
-        reject(bodies.filter { $0.kind == .planet }.count > 1, "最多添加一颗行星。")
+        reject(!bodies.contains { $0.kind == .star }, "至少需要一颗恒星。")
         reject(Set(bodies.map(\.id)).count != bodies.count, "天体标识不能重复。")
         reject(referenceStar == nil, "请选择有效的参考恒星。")
+        reject(calendarPlanetID != nil && planet == nil, "请选择有效的历法行星。")
         reject(!referenceDistanceAU.isFinite || referenceDistanceAU <= 0, "参考距离必须是正数。")
         reject(durationYears < 1 || durationYears > 100_000, "历法年数必须为 1 至 100000。")
         reject(!numerics.tolerance.isFinite || numerics.tolerance < 1e-14 || numerics.tolerance > 1e-7, "积分容差必须在 1e-14 至 1e-7 之间。")

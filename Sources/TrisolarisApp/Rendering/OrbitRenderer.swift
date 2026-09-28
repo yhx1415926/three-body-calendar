@@ -53,6 +53,7 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
     private var exaggeratedSizes = true
     private var resetToken: Int?
     private var camera = OrbitCamera()
+    private var dragCamera: OrbitCamera?
     private var hasFramed = false
     private var displaySizing = OrbitDisplaySizing()
     private var captureToken = 0
@@ -135,18 +136,20 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
         self.followsSelection = followSelected
         self.showGrid = showGrid
         self.exaggeratedSizes = exaggeratedSizes
-        camera.topDown = topDown
-        if (!hasFramed && !self.frame.bodies.isEmpty) || self.resetToken != resetToken {
-            resetCamera()
-        }
-        self.resetToken = resetToken
-        if followSelected, let body = self.frame.bodies.first(where: { $0.id == selectedID }) {
-            camera.target = body.position
-            if changedFollow {
-                camera.panOffset = .zero
-                let nearest = self.frame.bodies.filter { $0.id != body.id }.map { simd_length($0.position-body.position) }.min() ?? 1
-                camera.scale = max(nearest*1.5,body.radius*20,0.001)
-                camera.distance = camera.scale*3.5
+        if dragCamera == nil {
+            camera.topDown = topDown
+            if (!hasFramed && !self.frame.bodies.isEmpty) || self.resetToken != resetToken {
+                resetCamera()
+            }
+            self.resetToken = resetToken
+            if followSelected, let body = self.frame.bodies.first(where: { $0.id == selectedID }) {
+                camera.target = body.position
+                if changedFollow {
+                    camera.panOffset = .zero
+                    let nearest = self.frame.bodies.filter { $0.id != body.id }.map { simd_length($0.position-body.position) }.min() ?? 1
+                    camera.scale = max(nearest*1.5,body.radius*20,0.001)
+                    camera.distance = camera.scale*3.5
+                }
             }
         }
     }
@@ -185,6 +188,26 @@ final class OrbitRenderer: NSObject, MTKViewDelegate {
             return hypot($0.point.x - point.x, $0.point.y - point.y) < hypot($1.point.x - point.x, $1.point.y - point.y)
         }.first?.id
     }
+
+    func dragCandidate(at point: CGPoint, in size: CGSize) -> OrbitDragCandidate? {
+        guard let id = body(at: point, in: size), let body = frame.bodies.first(where: { $0.id == id }),
+              let geometry = OrbitBodyDrag(position: body.position, pointer: point, snapshot: camera.snapshot(size: size))
+        else { return nil }
+        return OrbitDragCandidate(id: id, geometry: geometry, camera: camera)
+    }
+
+    func beginBodyDrag(_ candidate: OrbitDragCandidate) {
+        camera = candidate.camera
+        dragCamera = candidate.camera
+    }
+
+    func previewBodyDrag(id: String, position: SIMD3<Double>) {
+        guard position.isRenderable, let index = frame.bodies.firstIndex(where: { $0.id == id }) else { return }
+        frame.bodies[index].position = position
+        geometryDirty = true
+    }
+
+    func endBodyDrag() { dragCamera = nil }
 
     private func displayRadius(_ body: RenderBody) -> Double {
         displaySizing.radius(for: body, enhanced: exaggeratedSizes)

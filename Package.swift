@@ -25,7 +25,7 @@ let package = Package(
             ],
             linkerSettings: [.linkedLibrary("m")]
         ),
-        .target(name: "SimulationCore", dependencies: ["CRebound"]),
+        .target(name: "SimulationCore", dependencies: ["CRebound"], resources: [.process("Resources")]),
         .executableTarget(
             name: "TrisolarisApp",
             dependencies: ["SimulationCore"],

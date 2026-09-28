@@ -32,7 +32,22 @@ public struct OrbitSceneFrame: Equatable, Sendable {
     }
 }
 
-/// A native Metal scene. Drag to orbit, Shift/right-drag to pan, scroll or pinch to zoom.
+public enum OrbitInteractionMode: String, CaseIterable, Identifiable, Sendable {
+    case navigate, moveBodies
+    public var id: Self { self }
+    public var title: String { self == .navigate ? "观察" : "移动天体" }
+    public var symbolName: String { self == .navigate ? "hand.draw" : "cursorarrow" }
+    public var help: String {
+        self == .navigate ? "拖动旋转，Shift 或右键拖动平移，滚动缩放。" :
+            "拖动天体调整初始位置，保持屏幕深度；Esc 取消。拖动空白旋转，Shift 或右键拖动平移。"
+    }
+}
+
+public enum OrbitBodyMovePhase: Equatable, Sendable {
+    case began, changed, ended, cancelled
+}
+
+/// SwiftUI owns the draft positions; AppKit reports a bounded editing gesture.
 @MainActor
 public struct OrbitSceneView: View {
     public var frame: OrbitSceneFrame
@@ -45,12 +60,16 @@ public struct OrbitSceneView: View {
     public var resetToken: Int
     public var captureToken: Int
     public var onCapture: ((Data) -> Void)?
+    public var interactionMode: OrbitInteractionMode
+    public var onMoveBody: ((String, SIMD3<Double>, OrbitBodyMovePhase) -> Void)?
 
     public init(frame: OrbitSceneFrame, trails: [String: [SIMD3<Double>]] = [:],
                 selectedID: Binding<String?>, followSelected: Bool = false,
                 topDown: Bool = false, showGrid: Bool = true,
                 exaggeratedSizes: Bool = true, resetToken: Int = 0,
-                captureToken: Int = 0, onCapture: ((Data) -> Void)? = nil) {
+                captureToken: Int = 0, onCapture: ((Data) -> Void)? = nil,
+                interactionMode: OrbitInteractionMode = .navigate,
+                onMoveBody: ((String, SIMD3<Double>, OrbitBodyMovePhase) -> Void)? = nil) {
         self.frame = frame
         self.trails = trails
         self._selectedID = selectedID
@@ -61,12 +80,14 @@ public struct OrbitSceneView: View {
         self.resetToken = resetToken
         self.captureToken = captureToken
         self.onCapture = onCapture
+        self.interactionMode = interactionMode
+        self.onMoveBody = onMoveBody
     }
 
     public var body: some View {
         OrbitMetalRepresentable(scene: self)
             .accessibilityLabel("三维恒星轨道")
-            .accessibilityHint("拖动旋转，Shift 拖动平移，滚动缩放，点击选择天体。")
+            .accessibilityHint(interactionMode.help)
     }
 }
 
@@ -81,6 +102,8 @@ private struct OrbitMetalRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ view: OrbitMetalView, context: Context) {
+        view.interactionMode = scene.interactionMode
+        view.onMoveBody = scene.onMoveBody
         view.renderer?.update(frame: scene.frame, trails: scene.trails,
                               selectedID: scene.selectedID, followSelected: scene.followSelected,
                               topDown: scene.topDown, showGrid: scene.showGrid,
@@ -91,9 +114,11 @@ private struct OrbitMetalRepresentable: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ view: OrbitMetalView, coordinator: ()) {
+        view.cancelBodyDrag()
         view.isPaused = true
         view.delegate = nil
         view.onSelect = nil
+        view.onMoveBody = nil
     }
 }
 
@@ -101,8 +126,21 @@ private struct OrbitMetalRepresentable: NSViewRepresentable {
 final class OrbitMetalView: MTKView {
     var renderer: OrbitRenderer?
     var onSelect: ((String?) -> Void)?
+    var onMoveBody: ((String, SIMD3<Double>, OrbitBodyMovePhase) -> Void)?
+    var interactionMode: OrbitInteractionMode = .navigate {
+        didSet {
+            guard oldValue != interactionMode else { return }
+            cancelBodyDrag()
+            window?.invalidateCursorRects(for: self)
+            setAccessibilityHelp(interactionMode.help)
+        }
+    }
     private var dragOrigin = NSPoint.zero
     private var hasDragged = false
+    private var bodyDrag: OrbitDragCandidate?
+    private var isMovingBody = false
+    private var draggedPosition: SIMD3<Double>?
+    private var ignoresMouseUntilUp = false
     private var tracking: NSTrackingArea?
     private var drawableResizeTask: Task<Void, Never>?
 
@@ -185,18 +223,43 @@ final class OrbitMetalView: MTKView {
         tracking = area
     }
 
-    override func cursorUpdate(with event: NSEvent) { NSCursor.openHand.set() }
+    private var restingCursor: NSCursor { interactionMode == .navigate ? .openHand : .arrow }
+    override func cursorUpdate(with event: NSEvent) {
+        (hasDragged && !isMovingBody ? NSCursor.closedHand : restingCursor).set()
+    }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: restingCursor) }
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         dragOrigin = convert(event.locationInWindow, from: nil)
         hasDragged = false
+        ignoresMouseUntilUp = false
+        bodyDrag = interactionMode == .moveBodies && onMoveBody != nil && !event.modifierFlags.contains(.shift)
+            ? renderer?.dragCandidate(at: dragOrigin, in: bounds.size) : nil
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard !ignoresMouseUntilUp else { return }
         let point = convert(event.locationInWindow, from: nil)
         if hypot(point.x - dragOrigin.x, point.y - dragOrigin.y) > 3 { hasDragged = true }
         guard hasDragged else { return }
+        if let candidate = bodyDrag {
+            if !isMovingBody {
+                isMovingBody = true
+                draggedPosition = candidate.geometry.originalPosition
+                renderer?.beginBodyDrag(candidate)
+                onSelect?(candidate.id)
+                onMoveBody?(candidate.id, candidate.geometry.originalPosition, .began)
+            }
+            guard let position = candidate.geometry.position(at: point) else { return }
+            draggedPosition = position
+            renderer?.previewBodyDrag(id: candidate.id, position: position)
+            onMoveBody?(candidate.id, position, .changed)
+            NSCursor.arrow.set()
+            needsDisplay = true
+            return
+        }
         NSCursor.closedHand.set()
         if event.modifierFlags.contains(.shift) {
             renderer?.pan(deltaX: event.deltaX, deltaY: event.deltaY, height: bounds.height)
@@ -207,35 +270,76 @@ final class OrbitMetalView: MTKView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if ignoresMouseUntilUp { ignoresMouseUntilUp = false; return }
+        if isMovingBody, let candidate = bodyDrag {
+            let position = candidate.geometry.position(at: convert(event.locationInWindow, from: nil))
+                ?? draggedPosition ?? candidate.geometry.originalPosition
+            finishBodyDrag(position: position, phase: .ended)
+            return
+        }
         if !hasDragged {
             onSelect?(renderer?.body(at: convert(event.locationInWindow, from: nil), in: bounds.size))
         }
-        NSCursor.openHand.set()
+        bodyDrag = nil
+        hasDragged = false
+        restingCursor.set()
+    }
+
+    func cancelBodyDrag() {
+        if isMovingBody, let candidate = bodyDrag {
+            ignoresMouseUntilUp = true
+            finishBodyDrag(position: candidate.geometry.originalPosition, phase: .cancelled)
+        } else { bodyDrag = nil }
+    }
+
+    private func finishBodyDrag(position: SIMD3<Double>, phase: OrbitBodyMovePhase) {
+        guard let candidate = bodyDrag else { return }
+        bodyDrag = nil
+        isMovingBody = false
+        hasDragged = false
+        draggedPosition = nil
+        renderer?.previewBodyDrag(id: candidate.id, position: position)
+        renderer?.endBodyDrag()
+        onMoveBody?(candidate.id, position, phase)
+        restingCursor.set()
+        needsDisplay = true
+    }
+
+    override func resignFirstResponder() -> Bool {
+        cancelBodyDrag()
+        return super.resignFirstResponder()
     }
 
     override func rightMouseDown(with event: NSEvent) { window?.makeFirstResponder(self) }
     override func rightMouseDragged(with event: NSEvent) {
+        guard !isMovingBody else { return }
         NSCursor.closedHand.set()
         renderer?.pan(deltaX: event.deltaX, deltaY: event.deltaY, height: bounds.height)
         needsDisplay = true
     }
-    override func rightMouseUp(with event: NSEvent) { NSCursor.openHand.set() }
+    override func rightMouseUp(with event: NSEvent) { restingCursor.set() }
 
     override func otherMouseDragged(with event: NSEvent) { rightMouseDragged(with: event) }
 
     override func scrollWheel(with event: NSEvent) {
+        guard !isMovingBody else { return }
         let scale = event.hasPreciseScrollingDeltas ? 0.012 : 0.09
         renderer?.zoom(logDelta: Double(event.scrollingDeltaY) * scale)
         needsDisplay = true
     }
 
     override func magnify(with event: NSEvent) {
+        guard !isMovingBody else { return }
         renderer?.zoom(logDelta: -Double(event.magnification) * 2.0)
         needsDisplay = true
     }
 
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command) { super.keyDown(with: event); return }
+        if isMovingBody {
+            if event.keyCode == 53 { cancelBodyDrag() }
+            return
+        }
         switch event.keyCode {
         case 123: renderer?.rotate(deltaX: -12, deltaY: 0)
         case 124: renderer?.rotate(deltaX: 12, deltaY: 0)

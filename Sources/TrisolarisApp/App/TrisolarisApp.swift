@@ -56,6 +56,7 @@ struct ObservatoryCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .newItem) {
             Button("打开项目…") { store?.openProject() }.keyboardShortcut("o").disabled(store?.isLoading == true)
+            Button("导入真实星系…") { store?.showObservedSystemSheet = true }.disabled(store?.canEditBodies != true)
             Button("关闭窗口") { NSApp.keyWindow?.performClose(nil) }.keyboardShortcut("w")
         }
         CommandGroup(replacing: .saveItem) {
@@ -68,6 +69,10 @@ struct ObservatoryCommands: Commands {
             Button("导出三维场景 PNG…") { store?.requestScenePNG() }
         }
         CommandMenu("模拟") {
+            Button("添加恒星") { store?.addBody(.star) }.disabled(store?.canEditBodies != true)
+            Button("添加行星") { store?.addBody(.planet) }.disabled(store?.canEditBodies != true)
+            Button("自定义数量随机生成…") { store?.showRandomSystemSheet = true }.disabled(store?.canEditBodies != true)
+            Divider()
             Button(store?.isPlaying == true ? "暂停观测" : "开始观测") { store?.togglePlayback() }.keyboardShortcut(.return, modifiers: [.command]).disabled(store?.isLoading == true || store?.isComputing == true)
             Button("单步推进") { store?.step() }.keyboardShortcut(".", modifiers: [.command])
             Button("回到初始状态") { Task { await store?.resetSimulation() } }.keyboardShortcut("r", modifiers: [.command])
@@ -86,6 +91,9 @@ struct ObservatoryCommands: Commands {
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
             }
             Divider()
+            Toggle("箭头 · 移动天体", isOn: Binding(get: { store?.interactionMode == .moveBodies }, set: { store?.setInteractionMode($0 ? .moveBodies : .navigate) }))
+                .keyboardShortcut("m", modifiers: [.command, .shift]).disabled(store?.isComputing == true)
+            Button("撤销位置修改") { store?.undoPositionEdit() }.disabled(store?.positionUndo == nil)
             Button("重置三维视角") { store?.resetToken += 1 }.keyboardShortcut("0")
             Toggle("俯视轨道", isOn: Binding(get: { store?.topDown ?? false }, set: { store?.topDown = $0 })).keyboardShortcut("t", modifiers: [.command, .shift])
             Toggle("跟随所选天体", isOn: Binding(get: { store?.followSelected ?? false }, set: { store?.followSelected = $0 })).keyboardShortcut("f", modifiers: [.command, .shift])

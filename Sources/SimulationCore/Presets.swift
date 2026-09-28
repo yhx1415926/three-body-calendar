@@ -260,6 +260,96 @@ public enum Presets {
                         notes: "可重现的随机初值，初始三星动能/势能绝对值比为 0.4。恒星半径、光度采用示例缩放，可自行修改。不保证长期束缚或行星存活。")
     }
 
+    /// Count-controlled random initial conditions. The original three-star generators above
+    /// and below retain their exact seeded arithmetic for old projects and reproductions.
+    public static func randomSystem(seed: UInt64, starCount: Int, planetCount: Int,
+                                    spatialScaleAU: Double = 8, virialRatio: Double = 0.4) throws -> Scenario {
+        guard starCount >= 1, starCount <= Scenario.maximumBodyCount,
+              planetCount >= 0, planetCount <= Scenario.maximumBodyCount-starCount else {
+            throw SimulationError.invalidScenario(["至少需要 1 颗恒星，恒星与行星合计不超过 \(Scenario.maximumBodyCount) 颗。"])
+        }
+        guard spatialScaleAU.isFinite, spatialScaleAU > 0, virialRatio.isFinite, virialRatio > 0 else {
+            throw SimulationError.invalidScenario(["随机空间尺度与动能比例必须是有限正数。"])
+        }
+        var rng = SplitMix64(state: seed)
+        // Identifiers consume a separate stream, so they do not affect the physical initial conditions.
+        var identityRNG = SplitMix64(state: seed ^ 0x6A09E667F3BCC909)
+        func identifier() -> UUID {
+            let high = identityRNG.next(), low = identityRNG.next()
+            return UUID(uuid: (
+                UInt8(truncatingIfNeeded: high >> 56), UInt8(truncatingIfNeeded: high >> 48),
+                UInt8(truncatingIfNeeded: high >> 40), UInt8(truncatingIfNeeded: high >> 32),
+                UInt8(truncatingIfNeeded: high >> 24), UInt8(truncatingIfNeeded: high >> 16),
+                UInt8(truncatingIfNeeded: high >> 8) & 0x0F | 0x40, UInt8(truncatingIfNeeded: high),
+                UInt8(truncatingIfNeeded: low >> 56) & 0x3F | 0x80, UInt8(truncatingIfNeeded: low >> 48),
+                UInt8(truncatingIfNeeded: low >> 40), UInt8(truncatingIfNeeded: low >> 32),
+                UInt8(truncatingIfNeeded: low >> 24), UInt8(truncatingIfNeeded: low >> 16),
+                UInt8(truncatingIfNeeded: low >> 8), UInt8(truncatingIfNeeded: low)))
+        }
+        let scenarioID = identifier()
+        var bodies: [CelestialBody] = []
+        for index in 0..<starCount {
+            let mass = 0.5+rng.unit()
+            var body = CelestialBody(id: identifier(), name: "恒星 \(index+1)", kind: .star,
+                massSolar: mass, radiusAU: pow(mass,0.8)*Astronomy.solarRadiusAU,
+                luminositySolar: pow(mass,3.5))
+            var placed = false
+            for _ in 0..<1000 {
+                let position = Vector3(rng.signed(),rng.signed(),rng.signed())*spatialScaleAU
+                if bodies.allSatisfy({ ($0.positionAU-position).length > max(3*($0.radiusAU+body.radiusAU),spatialScaleAU*0.2) }) {
+                    body.positionAU = position; placed = true; break
+                }
+            }
+            guard placed else { throw SimulationError.invalidScenario(["空间尺度过小，无法放置互不重叠的恒星。请增大随机空间尺度。"]) }
+            body.velocityAUPerDay = Vector3(rng.signed(),rng.signed(),rng.signed())
+            bodies.append(body)
+        }
+        recenter(&bodies)
+        var kinetic = 0.0, potential = 0.0
+        for i in bodies.indices {
+            kinetic += 0.5*bodies[i].massSolar*bodies[i].velocityAUPerDay.squaredLength
+            for j in bodies.indices where j > i {
+                potential += Astronomy.gravitationalConstant*bodies[i].massSolar*bodies[j].massSolar/(bodies[i].positionAU-bodies[j].positionAU).length
+            }
+        }
+        let speedScale = sqrt(virialRatio*potential/max(kinetic,1e-30))
+        for index in bodies.indices { bodies[index].velocityAUPerDay = bodies[index].velocityAUPerDay*speedScale }
+        for index in 0..<planetCount {
+            let host = bodies[index % starCount]
+            let earthMasses = 0.2+7.8*rng.unit()
+            var planet = CelestialBody(id: identifier(), name: "行星 \(index+1)", kind: .planet,
+                massSolar: earthMasses*Astronomy.earthMassSolar,
+                radiusAU: pow(earthMasses,1.0/3)*Astronomy.earthRadiusAU)
+            let baseDistance = sqrt(host.luminositySolar)*(0.65+0.35*Double(index/starCount)+0.25*rng.unit())
+            var placed = false
+            for attempt in 0..<128 {
+                var radial = Vector3(rng.signed(),rng.signed(),rng.signed())
+                guard radial.length > 1e-12 else { continue }
+                radial = radial/radial.length
+                let distance = baseDistance*pow(1.25,Double(attempt/16))
+                let position = host.positionAU+radial*distance
+                guard bodies.allSatisfy({ ($0.positionAU-position).length > 3*($0.radiusAU+planet.radiusAU) }) else { continue }
+                var tangent = radial.cross(Vector3(0,0,1))
+                if tangent.length < 1e-8 { tangent = radial.cross(Vector3(0,1,0)) }
+                tangent = tangent/tangent.length
+                planet.positionAU = position
+                planet.velocityAUPerDay = host.velocityAUPerDay+tangent*sqrt(Astronomy.gravitationalConstant*(host.massSolar+planet.massSolar)/distance)
+                placed = true; break
+            }
+            guard placed else { throw SimulationError.invalidScenario(["无法放置互不重叠的行星。请增大空间尺度或减少天体数量。"]) }
+            bodies.append(planet)
+        }
+        recenter(&bodies)
+        let scenario = Scenario(id: scenarioID, name: "随机星系 · \(starCount) 恒星 / \(planetCount) 行星 · \(seed)",
+            bodies: bodies, referenceStarID: bodies[0].id, referenceDistanceAU: sqrt(bodies[0].luminositySolar),
+            randomSeed: seed,
+            notes: "可重现的自定义数量随机初值。恒星初始空间尺度 \(spatialScaleAU) AU；多恒星情况下，加入行星前的恒星动能 / |势能| = \(virialRatio)。行星轮流围绕恒星放置，采用局部二体圆轨道速度，所有天体随后共同参与引力积分。参数是教学示例，不保证长期束缚、稳定或宜居。",
+            calendarPlanetID: bodies.first { $0.kind == .planet }?.id)
+        let issues = scenario.validationIssues()
+        guard issues.isEmpty else { throw SimulationError.invalidScenario(issues.map(\.message)) }
+        return scenario
+    }
+
     public static func recenter(_ bodies: inout [CelestialBody]) {
         let mass = bodies.reduce(0) { $0+$1.massSolar }
         guard mass > 0 else { return }
@@ -272,7 +362,8 @@ public enum Presets {
         var result = template
         var rng = SplitMix64(state: seed)
         var bodies = template.bodies.filter { $0.kind == .star }
-        guard bodies.count == 3, spatialScaleAU.isFinite, spatialScaleAU > 0, virialRatio.isFinite, virialRatio > 0 else { return template }
+        guard bodies.count == 3, template.bodies.filter({ $0.kind == .planet }).count <= 1,
+              spatialScaleAU.isFinite, spatialScaleAU > 0, virialRatio.isFinite, virialRatio > 0 else { return template }
         for index in bodies.indices {
             for _ in 0..<1000 {
                 let position = Vector3(rng.signed(), rng.signed(), rng.signed()) * spatialScaleAU
