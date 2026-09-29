@@ -91,7 +91,7 @@ teal.setFill()
 dash.fill()
 label("三体人的万年历", x: 45, y: 362, size: 22, weight: .semibold,
       color: pale, tracking: 0.6)
-label("TRISOLARIS CALENDAR  /  1.3.0", x: 45, y: 324, size: 10,
+label("TRISOLARIS CALENDAR  /  1.3.1", x: 45, y: 324, size: 10,
       weight: .medium, color: teal.withAlphaComponent(0.78), tracking: 1.25)
 
 let arrow = NSBezierPath()

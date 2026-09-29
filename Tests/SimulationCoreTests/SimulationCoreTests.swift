@@ -107,6 +107,23 @@ struct SimulationCoreTests {
         #expect(a.validationIssues().isEmpty)
     }
 
+    @Test("从无行星三星场景进入经典混沌星海，会补充且只补充一颗行星")
+    func randomRestoresPlanet() throws {
+        let template = Presets.figureEight(includePlanet: false)
+        let a = Presets.random(seed: 314159, template: template, spatialScaleAU: 8, virialRatio: 0.4)
+        let b = Presets.random(seed: 314159, template: template, spatialScaleAU: 8, virialRatio: 0.4)
+        #expect(a == b)
+        #expect(a.bodies.filter { $0.kind == .star }.count == 3)
+        #expect(a.bodies.filter { $0.kind == .planet }.count == 1)
+        #expect(a.planet != nil)
+        #expect(a.validationIssues().isEmpty)
+        for seed in 0..<128 {
+            let candidate = Presets.random(seed: UInt64(seed), template: template, spatialScaleAU: 8, virialRatio: 0.4)
+            #expect(candidate.bodies.filter { $0.kind == .planet }.count == 1)
+            #expect(candidate.validationIssues().isEmpty)
+        }
+    }
+
     @Test("错误参数和损坏检查点被拒绝")
     func invalidInput() throws {
         var configuration = Presets.stableHierarchy()

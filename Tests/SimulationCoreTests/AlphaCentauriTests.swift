@@ -4,6 +4,24 @@ import Testing
 
 @Suite("真实半人马座观测数据与初值")
 struct AlphaCentauriTests {
+    @Test("真实三星导入可附实验行星并实际生成历法")
+    func importedScenarioCanRunCalendar() throws {
+        var scenario = AlphaCentauriCatalog.scenarioWithExperimentalPlanet()
+        scenario.durationYears = 1
+        #expect(scenario.validationIssues().isEmpty)
+        #expect(scenario.bodies.filter { $0.kind == .star }.count == 3)
+        let planet = try #require(scenario.planet)
+        #expect(planet.name.contains("实验行星"))
+        #expect(abs((planet.positionAU - scenario.bodies[0].positionAU).length - scenario.referenceDistanceAU) < 1e-10)
+        let calendar = try CalendarSimulation(scenario: scenario)
+        while calendar.progress.status == .ready || calendar.progress.status == .running {
+            try calendar.advance(maxSamples: 512)
+        }
+        #expect(calendar.progress.status == .completed)
+        #expect(calendar.result.years.count == 1)
+        #expect(calendar.result.years[0].isComplete)
+    }
+
     @Test("公开观测表完整读取且保留单位、误差、原始时间和仪器")
     func publishedTables() throws {
         let rows = try AlphaCentauriCatalog.observations()

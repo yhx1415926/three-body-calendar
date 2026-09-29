@@ -15,6 +15,7 @@ struct ObservedSystemView: View {
     @State private var transferIssue: String?
     @State private var loading = true
     @State private var selection: String?
+    @State private var includeExperimentalPlanet = true
     private let pageSize = 200
     private var pageCount: Int { max(1, (filtered.count+pageSize-1)/pageSize) }
     private var currentPage: Int { min(tablePage, pageCount-1) }
@@ -90,12 +91,14 @@ struct ObservedSystemView: View {
             Divider()
             Text("三维模拟初值 · J1991.25 历元").font(.headline)
             Text(AlphaCentauriCatalog.modelSummary).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("添加一颗实验行星，以便生成万年历", isOn: $includeExperimentalPlanet)
+                .font(.caption)
             HStack {
-                Text("上表为实测记录；三维动画由轨道模型推算。导入仅含三颗恒星。").font(.caption).foregroundStyle(.secondary)
+                Text("恒星来自观测约束模型；实验行星为假设，不是观测数据。").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("导入三星参数") {
-                    store.replaceScenario(AlphaCentauriCatalog.initialScenario())
+                Button(includeExperimentalPlanet ? "导入并生成可运行场景" : "只导入三星参数") {
+                    store.replaceScenario(includeExperimentalPlanet ? AlphaCentauriCatalog.scenarioWithExperimentalPlanet() : AlphaCentauriCatalog.initialScenario())
                     dismiss()
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(loading || issue != nil || !store.canEditBodies)
             }

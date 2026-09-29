@@ -13,7 +13,7 @@ public enum AlphaCentauriCatalog {
         "比邻星的相对径向速度保留各仪器零点，不能与 A/B 的 km/s 数值直接相加；原始时间与测量单位均保留。",
         "比邻星相对距离约 12,947 ± 260 AU、速度约 273 ± 49 m/s。轨道存在观测不确定度，默认采用中心值，未传播协方差。",
         "内置模型采用一致的 2016/2017 动力学解；2021 观测汇编中的更新拟合解未混入旧外轨道。忽略银河潮汐、后牛顿修正和恒星光度随时间变化。",
-        "仅导入三颗恒星。添加的行星为用户假设，不能视为已确认的真实行星轨道。"
+        "真实模型仅包含三颗恒星；可选的实验行星是为生成万年历加入的假设，不能视为已确认的真实行星轨道。"
     ]
 
     public static let sources: [ObservedSystemSource] = [
@@ -128,6 +128,33 @@ public enum AlphaCentauriCatalog {
         return Scenario(name: "半人马座 α · 观测约束模型 J1991.25", bodies: bodies,
                         referenceStarID: ids[0], referenceDistanceAU: sqrt(1.521),
                         notes: ([modelSummary, coverageSummary] + limitations + sources.map { "\($0.title)：\($0.url.absoluteString)" }).joined(separator: "\n"))
+    }
+
+    /// A clearly hypothetical Earth-mass planet makes the observed triple usable
+    /// as a calendar experiment without treating a fitted planetary orbit as data.
+    public static func scenarioWithExperimentalPlanet() -> Scenario {
+        var scenario = initialScenario()
+        let host = scenario.bodies[0]
+        let companion = scenario.bodies[1]
+        let relativePosition = companion.positionAU - host.positionAU
+        let relativeVelocity = companion.velocityAUPerDay - host.velocityAUPerDay
+        let outward = -relativePosition / relativePosition.length
+        let angularMomentum = relativePosition.cross(relativeVelocity)
+        let tangent = angularMomentum.cross(outward) / angularMomentum.cross(outward).length
+        let radius = scenario.referenceDistanceAU
+        let mass = Astronomy.earthMassSolar
+        let planet = CelestialBody(
+            id: UUID(uuidString: "A0000000-0000-4000-8000-000000000004")!,
+            name: "实验行星 · α Cen A", kind: .planet,
+            massSolar: mass, radiusAU: Astronomy.earthRadiusAU,
+            positionAU: host.positionAU + outward * radius,
+            velocityAUPerDay: host.velocityAUPerDay + tangent * sqrt(Astronomy.gravitationalConstant * (host.massSolar + mass) / radius)
+        )
+        scenario.bodies.append(planet)
+        scenario.calendarPlanetID = planet.id
+        scenario.name = "半人马座 α · 实验行星"
+        scenario.notes += "\n实验行星采用 1 地球质量、1 地球半径，在 A 星单星参考辐照距离起步，初始速度按局部圆轨道设置。它不属于真实观测或已确认轨道；随后由四体引力积分。"
+        return scenario
     }
 
     // Exposed internally for a projection-vs-Hipparcos regression test, so a

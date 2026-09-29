@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import SimulationCore
 
 @main
 struct TrisolarisApp: App {
@@ -54,6 +55,10 @@ extension FocusedValues {
 struct ObservatoryCommands: Commands {
     @FocusedValue(\.workspaceStore) private var store
     var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("混沌星海 · 随机初始轨道") { store?.choosePreset(OrbitPreset.random.rawValue) }
+                .keyboardShortcut("n", modifiers: [.command]).disabled(store?.canEditBodies != true)
+        }
         CommandGroup(after: .newItem) {
             Button("打开项目…") { store?.openProject() }.keyboardShortcut("o").disabled(store?.isLoading == true)
             Button("导入真实星系…") { store?.showObservedSystemSheet = true }.disabled(store?.canEditBodies != true)

@@ -47,7 +47,7 @@ public enum OrbitPreset: Int, CaseIterable, Identifiable, Sendable {
         case .redDwarfPlanet: return "低质量、低光度主星与近轨行星，展示标准年的质量和距离依赖。"
         case .distantBinary: return "B、C 构成紧双星，A 携带行星在其远处运行，展示另一种三星层级。"
         case .figureEight: return "理想等质量三体的已知周期初值；默认不添加会扰动它的行星。"
-        case .random: return "保留当前天体参数，按种子、空间尺度和动能比例生成初值。"
+        case .random: return "保留当前恒星参数；无行星时自动补一颗实验行星，按种子和随机设置生成初值。"
         }
     }
 }
@@ -382,7 +382,8 @@ public enum Presets {
         }
         let speedScale = sqrt(virialRatio*potential/max(kinetic,1e-30))
         for i in bodies.indices { bodies[i].velocityAUPerDay = bodies[i].velocityAUPerDay*speedScale }
-        if var planet = template.planet, let host = bodies.first(where: { $0.id == template.referenceStarID }) {
+        if let host = bodies.first(where: { $0.id == template.referenceStarID }) {
+            var planet = template.planet ?? earth()
             let companion = bodies.filter { $0.id != host.id }.min { ($0.positionAU-host.positionAU).length < ($1.positionAU-host.positionAU).length }!
             let radial = (host.positionAU-companion.positionAU)/(host.positionAU-companion.positionAU).length
             var tangent = radial.cross(Vector3(0,0,1))
@@ -394,7 +395,8 @@ public enum Presets {
         }
         recenter(&bodies)
         result.bodies = bodies; result.randomSeed = seed; result.name = "混沌星海 · \(seed)"
-        result.notes = "保留天体参数的种子随机初值。空间尺度 \(spatialScaleAU) AU，初始三星动能 / |势能| = \(virialRatio)。不保证长期束缚或行星存活。"
+        result.calendarPlanetID = bodies.first { $0.kind == .planet }?.id
+        result.notes = "保留恒星参数的种子随机初值。空间尺度 \(spatialScaleAU) AU，初始三星动能 / |势能| = \(virialRatio)。\(template.planet == nil ? "原场景没有行星，已加入一颗地球型实验行星。" : "保留原有行星参数。")不保证长期束缚或行星存活。"
         return result
     }
 
